@@ -1,4 +1,6 @@
-broker
+# Compiled Go binaries (NOT the source code!)
+/cmd/broker/broker
+/cmd/broker/broker.exe
 *.exe
 *.test
 *.out
