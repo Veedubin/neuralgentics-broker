@@ -204,12 +204,12 @@ func (b *Broker) ReloadServerWithConfig(name string, newConfig types.ServerConfi
 }
 
 // DeregisterServer removes a server from the registry and stops it if running.
-// It also stops the async proxy reader for the server.
+// It does NOT stop the shared proxy — the proxy is broker-level, not server-level,
+// and stopping it would kill the async reader for all other running servers.
+// The server process is stopped via launcher, and its stdout will EOF naturally,
+// causing the readLoop goroutine to exit cleanly.
 func (b *Broker) DeregisterServer(name string) error {
-	// Stop the async reader first.
-	b.proxy.Stop()
-
-	// Stop the server process.
+	// Stop the server process (stdout EOF will cause reader to exit).
 	_ = b.launcher.Stop(name)
 
 	return b.registry.Deregister(name)

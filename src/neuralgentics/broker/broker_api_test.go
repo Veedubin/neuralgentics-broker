@@ -98,6 +98,98 @@ func TestDeregisterServer_NotRegistered(t *testing.T) {
 	}
 }
 
+// TestDeregisterServer_DoesNotKillSharedProxy verifies that deregistering
+// one server does NOT stop the shared proxy, which would kill the async
+// reader for all other servers. This is a regression test for the bug where
+// DeregisterServer unconditionally called b.proxy.Stop().
+func TestDeregisterServer_DoesNotKillSharedProxy(t *testing.T) {
+	b := NewBroker()
+
+	// Register two servers.
+	serverA := types.ServerConfig{
+		Name:    "server-a",
+		Command: "sleep",
+		Args:    []string{"60"},
+		Type:    "stdio",
+	}
+	serverB := types.ServerConfig{
+		Name:    "server-b",
+		Command: "sleep",
+		Args:    []string{"60"},
+		Type:    "stdio",
+	}
+	if err := b.RegisterServer(serverA); err != nil {
+		t.Fatalf("RegisterServer server-a failed: %v", err)
+	}
+	if err := b.RegisterServer(serverB); err != nil {
+		t.Fatalf("RegisterServer server-b failed: %v", err)
+	}
+
+	// Start both servers via the launcher (bypass MCP handshake since
+	// sleep isn't an MCP server). We need real processes with pipes.
+	entryA, ok := b.registry.Get("server-a")
+	if !ok {
+		t.Fatal("expected server-a in registry")
+	}
+	if err := b.launcher.Start(entryA.Config); err != nil {
+		t.Fatalf("launcher.Start server-a failed: %v", err)
+	}
+	entryB, ok := b.registry.Get("server-b")
+	if !ok {
+		t.Fatal("expected server-b in registry")
+	}
+	if err := b.launcher.Start(entryB.Config); err != nil {
+		t.Fatalf("launcher.Start server-b failed: %v", err)
+	}
+
+	// Verify both processes are running.
+	entryA, _ = b.registry.Get("server-a")
+	entryB, _ = b.registry.Get("server-b")
+	if entryA.Process == nil {
+		t.Fatal("expected server-a process to be running")
+	}
+	if entryB.Process == nil {
+		t.Fatal("expected server-b process to be running")
+	}
+
+	// Deregister server-a only. This MUST NOT stop the shared proxy.
+	if err := b.DeregisterServer("server-a"); err != nil {
+		t.Fatalf("DeregisterServer server-a failed: %v", err)
+	}
+
+	// Verify server-a is gone from the registry.
+	statuses := b.ListServers()
+	for _, s := range statuses {
+		if s.Name == "server-a" {
+			t.Error("server-a should be deregistered")
+		}
+	}
+
+	// Verify server-b is still in the registry and still has its process.
+	entryB, ok = b.registry.Get("server-b")
+	if !ok {
+		t.Fatal("expected server-b to still be registered")
+	}
+	if entryB.Process == nil {
+		t.Error("expected server-b process to still be running after server-a was deregistered")
+	}
+
+	// Verify the proxy's running state is not disrupted.
+	// Before the fix, b.proxy.Stop() was called, setting running=false.
+	// After the fix, the proxy should remain usable.
+	// We can't directly verify the proxy's internal state from here,
+	// but we can verify that server-b can still be deregistered cleanly.
+	if err := b.DeregisterServer("server-b"); err != nil {
+		t.Fatalf("DeregisterServer server-b failed after server-a deregister: %v", err)
+	}
+
+	// Verify both servers are gone.
+	statuses = b.ListServers()
+	if len(statuses) != 0 {
+		t.Errorf("expected 0 servers after deregistering both, got %d", len(statuses))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ListServers tests
 // ---------------------------------------------------------------------------
