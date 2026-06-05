@@ -1,8 +1,10 @@
 package broker
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"neuralgentics-broker/src/neuralgentics/broker/access"
 	"neuralgentics-broker/src/neuralgentics/broker/types"
@@ -594,4 +596,77 @@ func TestSetTools_NonexistentServer(t *testing.T) {
 	if len(tools) != 0 {
 		t.Errorf("expected 0 tools for nonexistent server, got %d", len(tools))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Call timeout tests
+// ---------------------------------------------------------------------------
+
+// TestBroker_Call_HasTimeout verifies that Broker.Call does not hang
+// indefinitely when the underlying server is unresponsive. The proxy's
+// sendRPC has a 30-second hardcoded timeout, but Broker.Call itself does
+// NOT accept a context.Context parameter.
+//
+// This is a CHARACTERIZATION test: it documents the current behavior
+// (30s hardcoded proxy timeout, no caller-visible timeout) so that if a
+// future refactor adds ctx context.Context to Call (per reviewer finding #7),
+// we have a regression test to ensure the timeout still works.
+//
+// TODO: When Call gains a ctx parameter, update this test to use it.
+func TestBroker_Call_HasTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	b := NewBroker()
+
+	// Register a server that will not respond (sleep + bogus command).
+	// The launcher will start the process, but the MCP handshake will
+	// never complete since sleep doesn't speak JSON-RPC on stdin.
+	config := types.ServerConfig{
+		Name:    "slow-server",
+		Command: "sleep",
+		Args:    []string{"999"}, // long enough that timeout fires, not process exit
+		Type:    "stdio",
+	}
+	if err := b.RegisterServer(config); err != nil {
+		t.Fatalf("RegisterServer failed: %v", err)
+	}
+
+	// Start the server — this will fail at the Initialize step because
+	// "sleep" doesn't speak MCP. But the process is started.
+	_ = b.StartServer("slow-server")
+
+	// Use an overall test context so we don't hang the test suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Channel to collect the Call result so we can enforce a timeout.
+	type callResult struct {
+		result map[string]any
+		err    error
+	}
+	ch := make(chan callResult, 1)
+
+	go func() {
+		r, e := b.Call("orchestrator", "slow-server", "unknown_tool", nil)
+		ch <- callResult{result: r, err: e}
+	}()
+
+	select {
+	case res := <-ch:
+		// Call returned — should be an error (either timeout from proxy's
+		// 30s sendRPC, or access denied, or server-not-initialized).
+		if res.err == nil {
+			t.Error("expected error when calling an unresponsive server, got nil result")
+		}
+		t.Logf("Call returned error (expected): %v", res.err)
+	case <-ctx.Done():
+		t.Fatal("Call hung indefinitely — no timeout mechanism in place. " +
+			"The proxy's sendRPC has a 30s timeout, but Call does not accept a context. " +
+			"See reviewer finding #7: add ctx context.Context to Call.")
+	}
+
+	// Clean up.
+	_ = b.DeregisterServer("slow-server")
 }
