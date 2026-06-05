@@ -46,7 +46,7 @@ const (
 // Unregistered servers (not in this map) also default to allow-all.
 //
 // Permission matrix (derived from AGENTS.md v0.5.0 Agent Permission Overhaul):
-//   - memini-ai-dev: allow-all (baseline tool server for every role)
+//   - memoryManager: allow-all (baseline tool server for every role)
 //   - neuralgentics:  allow-all (core dispatch/broker server)
 //   - github-mcp:     restricted to boomerang-git only (plus orchestrator wildcard)
 //   - playwright:     web automation for tester, scraper, researcher
@@ -56,7 +56,7 @@ const (
 //   - markitdown:     document conversion for architect, writer, git, release
 var DefaultServerRoles = map[string][]Role{
 	// Baseline servers — all roles can access (empty list = allow-all).
-	"memini-ai-dev": {},
+	"memoryManager": {},
 	"neuralgentics": {},
 
 	// Restricted servers — explicit role lists.

@@ -45,9 +45,9 @@ func TestCanAccess_UnknownRole(t *testing.T) {
 	if ac.CanAccess("unknown-role", "playwright") {
 		t.Error("expected unknown role to be denied access to playwright, got allowed")
 	}
-	// Unknown role CAN access baseline servers (memini-ai-dev, neuralgentics) and unregistered.
-	if !ac.CanAccess("unknown-role", "memini-ai-dev") {
-		t.Error("expected unknown role to access memini-ai-dev (allow-all)")
+	// Unknown role CAN access baseline servers (memoryManager, neuralgentics) and unregistered.
+	if !ac.CanAccess("unknown-role", "memoryManager") {
+		t.Error("expected unknown role to access memoryManager (allow-all)")
 	}
 	if !ac.CanAccess("unknown-role", "neuralgentics") {
 		t.Error("expected unknown role to access neuralgentics (allow-all)")
@@ -88,7 +88,7 @@ func TestCanAccess_FullRoleServerMatrix(t *testing.T) {
 	ac := DefaultAccessControl()
 
 	// Define expected access: role → set of servers it CAN access (from DefaultServerRoles).
-	// Baseline servers (memini-ai-dev, neuralgentics) have empty lists → allow-all.
+	// Baseline servers (memoryManager, neuralgentics) have empty lists → allow-all.
 	// Unregistered servers → default allow.
 	// Orchestrator → wildcard.
 	type expected struct {
@@ -100,139 +100,139 @@ func TestCanAccess_FullRoleServerMatrix(t *testing.T) {
 	matrix := map[string][]expected{
 		// Orchestrator: wildcard — all servers allowed.
 		"orchestrator": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", true},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", true},
 			{"playwright", true}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", true},
 		},
 		// coder: searxng, webfetch, websearch + baseline.
 		"coder": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// architect: searxng, webfetch, websearch, markitdown + baseline.
 		"architect": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", true},
 		},
 		// explorer: baseline only.
 		"explorer": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// tester: playwright, webfetch, websearch + baseline.
 		"tester": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", true}, {"searxng", false}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// writer: markitdown + baseline.
 		"writer": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", true},
 		},
 		// linter: searxng, webfetch, websearch + baseline.
 		"linter": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// git: searxng, webfetch, websearch, markitdown + baseline. (NOT github-mcp; only boomerang-git gets that.)
 		"git": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", true},
 		},
 		// researcher: playwright, searxng, webfetch, websearch + baseline.
 		"researcher": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", true}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// reviewer: baseline only.
 		"reviewer": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// boomerang-coder: searxng, webfetch, websearch + baseline.
 		"boomerang-coder": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// boomerang-architect: searxng, webfetch, websearch, markitdown + baseline.
 		"boomerang-architect": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", true},
 		},
 		// boomerang-explorer: baseline only.
 		"boomerang-explorer": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// boomerang-tester: playwright, webfetch, websearch + baseline.
 		"boomerang-tester": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", true}, {"searxng", false}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// boomerang-linter: searxng, webfetch, websearch + baseline.
 		"boomerang-linter": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// boomerang-git: github-mcp, searxng, webfetch, websearch, markitdown + baseline.
 		"boomerang-git": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", true},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", true},
 			{"playwright", false}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", true},
 		},
 		// boomerang-writer: markitdown + baseline.
 		"boomerang-writer": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", true},
 		},
 		// boomerang-scraper: searxng, webfetch, websearch, playwright + baseline.
 		"boomerang-scraper": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", true}, {"searxng", true}, {"webfetch", true},
 			{"websearch", true}, {"markitdown", false},
 		},
 		// boomerang-release: markitdown + baseline (NO github-mcp per AGENTS.md).
 		"boomerang-release": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", true},
 		},
 		// boomerang-init: baseline only.
 		"boomerang-init": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// boomerang-handoff: baseline only.
 		"boomerang-handoff": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// boomerang-agent-builder: baseline only.
 		"boomerang-agent-builder": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
 		// mcp-specialist: baseline only.
 		"mcp-specialist": {
-			{"memini-ai-dev", true}, {"neuralgentics", true}, {"github-mcp", false},
+			{"memoryManager", true}, {"neuralgentics", true}, {"github-mcp", false},
 			{"playwright", false}, {"searxng", false}, {"webfetch", false},
 			{"websearch", false}, {"markitdown", false},
 		},
@@ -304,7 +304,7 @@ func TestGetAccessibleServers_Orchestrator(t *testing.T) {
 	ac := DefaultAccessControl()
 	servers := ac.GetAccessibleServers("orchestrator")
 
-	expected := []string{"github-mcp", "markitdown", "memini-ai-dev", "neuralgentics", "playwright", "searxng", "webfetch", "websearch"}
+	expected := []string{"github-mcp", "markitdown", "memoryManager", "neuralgentics", "playwright", "searxng", "webfetch", "websearch"}
 	if len(servers) != len(expected) {
 		t.Fatalf("expected %d servers for orchestrator, got %d: %v", len(expected), len(servers), servers)
 	}
@@ -319,8 +319,8 @@ func TestGetAccessibleServers_BoomerangGit(t *testing.T) {
 	ac := DefaultAccessControl()
 	servers := ac.GetAccessibleServers("boomerang-git")
 
-	// boomerang-git can access: github-mcp + searxng, webfetch, websearch, markitdown + baseline (memini-ai-dev, neuralgentics)
-	expected := []string{"github-mcp", "markitdown", "memini-ai-dev", "neuralgentics", "searxng", "webfetch", "websearch"}
+	// boomerang-git can access: github-mcp + searxng, webfetch, websearch, markitdown + baseline (memoryManager, neuralgentics)
+	expected := []string{"github-mcp", "markitdown", "memoryManager", "neuralgentics", "searxng", "webfetch", "websearch"}
 	if len(servers) != len(expected) {
 		t.Fatalf("expected %d servers for boomerang-git, got %d: %v", len(expected), len(servers), servers)
 	}
@@ -335,7 +335,7 @@ func TestGetAccessibleServers_Explorer(t *testing.T) {
 	ac := DefaultAccessControl()
 	servers := ac.GetAccessibleServers("explorer")
 	// explorer can only access baseline servers (allow-all).
-	expected := []string{"memini-ai-dev", "neuralgentics"}
+	expected := []string{"memoryManager", "neuralgentics"}
 	if len(servers) != len(expected) {
 		t.Fatalf("expected %d servers for explorer, got %d: %v", len(expected), len(servers), servers)
 	}
@@ -489,7 +489,7 @@ func TestServerNames(t *testing.T) {
 	}
 
 	// Verify expected servers present.
-	expectedServers := []string{"memini-ai-dev", "neuralgentics", "github-mcp", "playwright", "searxng", "webfetch", "websearch", "markitdown"}
+	expectedServers := []string{"memoryManager", "neuralgentics", "github-mcp", "playwright", "searxng", "webfetch", "websearch", "markitdown"}
 	for _, exp := range expectedServers {
 		found := false
 		for _, n := range names {
@@ -561,7 +561,7 @@ func TestErrUnauthorized_ToJSONError(t *testing.T) {
 		Role:             "coder",
 		Server:           "playwright",
 		Reason:           "role coder cannot access server playwright",
-		AvailableServers: []string{"github-mcp", "memini-ai-dev"},
+		AvailableServers: []string{"github-mcp", "memoryManager"},
 	}
 	jsonErr := err.ToJSONError()
 
@@ -701,9 +701,9 @@ func TestCanAccess_BoomerangCoder(t *testing.T) {
 
 func TestCanAccess_MCPSpecialist(t *testing.T) {
 	ac := DefaultAccessControl()
-	// mcp-specialist can access: baseline (memini-ai-dev, neuralgentics) only.
-	if !ac.CanAccess("mcp-specialist", "memini-ai-dev") {
-		t.Error("expected mcp-specialist to access memini-ai-dev")
+	// mcp-specialist can access: baseline (memoryManager, neuralgentics) only.
+	if !ac.CanAccess("mcp-specialist", "memoryManager") {
+		t.Error("expected mcp-specialist to access memoryManager")
 	}
 	if !ac.CanAccess("mcp-specialist", "neuralgentics") {
 		t.Error("expected mcp-specialist to access neuralgentics")

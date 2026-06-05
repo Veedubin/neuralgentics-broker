@@ -480,7 +480,7 @@ func TestAccessControl_DefaultRoles(t *testing.T) {
 	}
 
 	// Verify orchestrator has access to all default servers.
-	for _, server := range []string{"github-mcp", "memini-ai-dev", "playwright", "searxng", "markitdown"} {
+	for _, server := range []string{"github-mcp", "memoryManager", "playwright", "searxng", "markitdown"} {
 		if !ac.CanAccess("orchestrator", server) {
 			t.Errorf("expected orchestrator to access %s", server)
 		}
