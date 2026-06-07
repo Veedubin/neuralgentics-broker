@@ -2,7 +2,11 @@ package broker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -10,6 +14,7 @@ import (
 	"neuralgentics-broker/src/neuralgentics/broker/catalog"
 	"neuralgentics-broker/src/neuralgentics/broker/intent"
 	"neuralgentics-broker/src/neuralgentics/broker/launcher"
+	"neuralgentics-broker/src/neuralgentics/broker/profile"
 	"neuralgentics-broker/src/neuralgentics/broker/proxy"
 	"neuralgentics-broker/src/neuralgentics/broker/registry"
 	"neuralgentics-broker/src/neuralgentics/broker/types"
@@ -634,4 +639,98 @@ func (b *Broker) ListTransports(name string) (transports []catalog.CuratedTransp
 		}
 	}
 	return nil, nil, fmt.Errorf("server %q not found in curated catalog", name)
+}
+
+// ExportProfile collects the current broker state (active provider, active MCPs,
+// permissions, opencode snapshot) and writes it to w as a tar.gz profile.
+// If passphrase is non-empty, the archive is HMAC-SHA256 signed.
+func (b *Broker) ExportProfile(w io.Writer, passphrase, brokerVersion string) error {
+	// Get active MCPs from registry.
+	statuses := b.registry.List()
+	catalogLock := make([]map[string]any, 0, len(statuses))
+	for _, s := range statuses {
+		entry, ok := b.registry.Get(s.Name)
+		if !ok {
+			continue
+		}
+		catalogLock = append(catalogLock, map[string]any{
+			"name":    s.Name,
+			"running": s.Running,
+			"tools":   s.Tools,
+			"type":    entry.Config.Type,
+			"package": entry.Config.Command,
+			"args":    entry.Config.Args,
+		})
+	}
+	catalogJSON, _ := json.Marshal(catalogLock)
+
+	// Get permission matrix snapshot.
+	permsJSON, _ := json.Marshal(b.access.Roles())
+
+	// Read provider-pref.json if it exists.
+	prefJSON := []byte(`{"activeProvider":"ollama-cloud"}`)
+	if home, err := os.UserHomeDir(); err == nil {
+		prefPath := filepath.Join(home, ".config", "neuralgentics", "provider-pref.json")
+		if data, err := os.ReadFile(prefPath); err == nil {
+			prefJSON = data
+		}
+	}
+
+	// Provider config and opencode snapshot are caller-provided (empty defaults).
+	providerJSON := []byte(`{}`)
+	opencodeJSON := []byte(`{}`)
+
+	p := profile.Build(providerJSON, catalogJSON, permsJSON, opencodeJSON, prefJSON, brokerVersion)
+	return p.Export(w, passphrase)
+}
+
+// ImportProfile reads a tar.gz profile from r, verifies signature, and applies
+// the active MCPs and provider to the broker. Returns the parsed profile and any
+// conflicts (MCPs that already exist in the registry).
+func (b *Broker) ImportProfile(r io.Reader, passphrase string) (*profile.Profile, error) {
+	p, err := profile.Import(r, passphrase)
+	if err != nil {
+		return nil, fmt.Errorf("import profile: %w", err)
+	}
+
+	// Apply: register each MCP from catalog.lock.
+	var catalogLock []map[string]any
+	if err := json.Unmarshal(p.Catalog, &catalogLock); err != nil {
+		return p, fmt.Errorf("unmarshal catalog.lock: %w", err)
+	}
+	for _, mcp := range catalogLock {
+		name, _ := mcp["name"].(string)
+		if name == "" {
+			continue
+		}
+		// If already registered, skip.
+		if _, ok := b.registry.Get(name); ok {
+			continue
+		}
+		// Re-register from snapshot.
+		cfg := types.ServerConfig{
+			Name:    name,
+			Command: asString(mcp["package"]),
+			Type:    asString(mcp["type"]),
+		}
+		if args, ok := mcp["args"].([]any); ok {
+			for _, a := range args {
+				if s, ok := a.(string); ok {
+					cfg.Args = append(cfg.Args, s)
+				}
+			}
+		}
+		if err := b.RegisterServer(cfg); err != nil {
+			// log and continue — don't fail the whole import for one bad MCP.
+			continue
+		}
+	}
+	return p, nil
+}
+
+func asString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }

@@ -209,6 +209,21 @@ func (ac *AccessControl) ServerNames() []string {
 	return names
 }
 
+// Roles returns a defensive copy of the internal serverRoles map,
+// converted to string keys and string slice values for JSON serialization.
+// This is used by the profile export to snapshot the permission matrix.
+func (ac *AccessControl) Roles() map[string][]string {
+	result := make(map[string][]string, len(ac.serverRoles))
+	for server, roles := range ac.serverRoles {
+		rs := make([]string, len(roles))
+		for i, r := range roles {
+			rs[i] = string(r)
+		}
+		result[server] = rs
+	}
+	return result
+}
+
 // AllRoles returns all Role constants defined in this package.
 func AllRoles() []Role {
 	return []Role{
