@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -152,4 +153,21 @@ func InferCapabilities(tools []types.ToolSummary) []string {
 		}
 	}
 	return caps
+}
+
+// RegisterMCPServer adds a multi-transport server configuration to the registry.
+// It validates the config, converts the first transport to a legacy ServerConfig,
+// and registers it using the existing Register method.
+func (r *Registry) RegisterMCPServer(config types.MCPServerConfig) error {
+	if config.Name == "" {
+		return fmt.Errorf("server name is required")
+	}
+	if len(config.Transports) == 0 {
+		return fmt.Errorf("at least one transport is required")
+	}
+	sc, err := config.ToLegacyServerConfig()
+	if err != nil {
+		return fmt.Errorf("convert transport to legacy config: %w", err)
+	}
+	return r.Register(sc)
 }

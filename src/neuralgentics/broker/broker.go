@@ -215,6 +215,61 @@ func (b *Broker) DeregisterServer(name string) error {
 	return b.registry.Deregister(name)
 }
 
+// RegisterMCPServer adds a multi-transport server configuration to the registry.
+// The first transport in MCPServerConfig.Transports is used as the default
+// unless overridden via ActivateMCPServerWithTransport.
+func (b *Broker) RegisterMCPServer(config types.MCPServerConfig) error {
+	return b.registry.RegisterMCPServer(config)
+}
+
+// ActivateMCPServerWithTransport activates a registered MCP server using a
+// specific transport from the provided MCPServerConfig. The server must already
+// be registered via RegisterServer or RegisterMCPServer. If transportIndex is -1,
+// the first transport is used. If the chosen transport fails, the next is tried
+// as fallback. Returns the transport.Type that succeeded.
+// The caller is responsible for keeping config in sync with what was registered.
+func (b *Broker) ActivateMCPServerWithTransport(name string, config types.MCPServerConfig, transportIndex int) (string, error) {
+	entry, ok := b.registry.Get(name)
+	if !ok {
+		return "", fmt.Errorf("server %q not registered", name)
+	}
+	if len(config.Transports) == 0 {
+		return "", fmt.Errorf("server %q has no transports declared", name)
+	}
+
+	// Determine start index.
+	startIdx := transportIndex
+	if startIdx < 0 || startIdx >= len(config.Transports) {
+		startIdx = 0
+	}
+
+	// Try transports in order, starting at startIdx, wrapping around.
+	n := len(config.Transports)
+	for i := 0; i < n; i++ {
+		idx := (startIdx + i) % n
+		transport := config.Transports[idx]
+
+		// Build a temporary ServerConfig for this transport only.
+		sc := transport.ToServerConfig(name, config.Description, config.Capabilities)
+		// Replace entry.Config with the chosen transport's legacy form.
+		oldConfig := entry.Config
+		entry.Config = sc
+		b.registry.UpdateEntry(name, entry)
+
+		// Try to start.
+		err := b.StartServer(name)
+		if err == nil {
+			return string(transport.Type), nil
+		}
+
+		// Roll back config on failure so the next iteration starts from a known state.
+		entry.Config = oldConfig
+		b.registry.UpdateEntry(name, entry)
+	}
+
+	return "", fmt.Errorf("all %d transports failed for server %q", n, name)
+}
+
 // ListServers returns the status of all registered servers.
 func (b *Broker) ListServers() []types.ServerStatus {
 	return b.registry.List()

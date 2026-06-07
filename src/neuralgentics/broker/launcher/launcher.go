@@ -157,6 +157,14 @@ func (l *Launcher) clearAfterExit(name string) {
 	l.registry.UpdateEntry(name, entry)
 }
 
+// BuildCommandForTransport constructs an exec.Cmd for a single transport option.
+// This is the canonical way to convert a TransportConfig into a runnable process.
+// It does NOT register or start the process — call Launcher.Start() separately.
+func BuildCommandForTransport(t types.TransportConfig, name, description string, capabilities []string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+	sc := t.ToServerConfig(name, description, capabilities)
+	return buildCommand(sc)
+}
+
 // buildCommand constructs an exec.Cmd for the given server config.
 // For stdio-type servers, it sets up stdin/stdout pipes.
 func buildCommand(config types.ServerConfig) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
