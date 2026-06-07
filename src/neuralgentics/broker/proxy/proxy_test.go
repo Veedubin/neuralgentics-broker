@@ -250,6 +250,9 @@ func TestStartReader_Notification(t *testing.T) {
 }
 
 func TestStartReader_ConcurrentRequests(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent reader test in -short mode (slow, exercises mock subprocess lifecycle)")
+	}
 	// Test that multiple concurrent sendRPC calls receive their correct responses.
 	srv, stdinW, stdoutR := newMockServer()
 	go srv.run(t)
