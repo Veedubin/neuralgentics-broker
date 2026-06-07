@@ -1,0 +1,231 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-07",
+  "description": "Curated catalog of popular MCP servers with multi-transport declarations",
+  "servers": [
+    {
+      "name": "github-mcp",
+      "description": "GitHub repository management, issues, PRs, and actions",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "developer",
+      "capabilities": ["github", "git", "issues", "prs", "actions"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-github", "default": true, "description": "Official MCP server via NPX"},
+        {"type": "docker", "package": "mcp/github", "description": "Containerized (community image)"}
+      ],
+      "required_env": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+    },
+    {
+      "name": "gitlab-mcp",
+      "description": "GitLab project management, merge requests, and CI/CD",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "developer",
+      "capabilities": ["gitlab", "merge-requests", "ci-cd"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-gitlab", "default": true, "description": "Official GitLab MCP server via NPX"}
+      ],
+      "required_env": ["GITLAB_PERSONAL_ACCESS_TOKEN"]
+    },
+    {
+      "name": "filesystem",
+      "description": "File system read/write operations with configurable access paths",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "storage",
+      "capabilities": ["filesystem", "read", "write", "directory-listing"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-filesystem", "default": true, "description": "Official filesystem MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "postgres",
+      "description": "PostgreSQL database query and schema inspection",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "data",
+      "capabilities": ["postgres", "sql", "database", "schema"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-postgres", "default": true, "description": "Official PostgreSQL MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "sqlite",
+      "description": "SQLite database operations and query execution",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "data",
+      "capabilities": ["sqlite", "sql", "database"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-sqlite", "default": true, "description": "Official SQLite MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "puppeteer",
+      "description": "Browser automation and web scraping via Puppeteer",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "web",
+      "capabilities": ["puppeteer", "browser", "automation", "scraping"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-puppeteer", "default": true, "description": "Official Puppeteer MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "playwright",
+      "description": "Browser automation and testing via Playwright",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "web",
+      "capabilities": ["playwright", "browser", "automation", "testing"],
+      "transports": [
+        {"type": "npx", "package": "@playwright/mcp", "default": true, "description": "Official Playwright MCP server via NPX"},
+        {"type": "docker", "package": "mcr.microsoft.com/playwright/mcp:latest", "description": "Microsoft Playwright container"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "fetch",
+      "description": "Web content fetching and HTTP request execution",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "web",
+      "capabilities": ["fetch", "http", "web"],
+      "transports": [
+        {"type": "uvx", "package": "mcp-server-fetch", "default": true, "description": "Official Fetch MCP server via UVX (Python)"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "brave-search",
+      "description": "Web search via Brave Search API",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "web",
+      "capabilities": ["brave", "search", "web"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-brave-search", "default": true, "description": "Official Brave Search MCP server via NPX"}
+      ],
+      "required_env": ["BRAVE_API_KEY"]
+    },
+    {
+      "name": "google-maps",
+      "description": "Google Maps geocoding, directions, and places search",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "web",
+      "capabilities": ["google-maps", "geocoding", "directions", "places"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-google-maps", "default": true, "description": "Official Google Maps MCP server via NPX"}
+      ],
+      "required_env": ["GOOGLE_MAPS_API_KEY"]
+    },
+    {
+      "name": "slack",
+      "description": "Slack messaging, channels, and workspace management",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "messaging",
+      "capabilities": ["slack", "messaging", "channels", "workspace"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-slack", "default": true, "description": "Official Slack MCP server via NPX"}
+      ],
+      "required_env": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"]
+    },
+    {
+      "name": "discord",
+      "description": "Discord messaging and server management",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "messaging",
+      "capabilities": ["discord", "messaging", "channels"],
+      "transports": [
+        {"type": "npx", "package": "mcp-server-discord", "default": true, "description": "Discord MCP server via NPX"}
+      ],
+      "required_env": ["DISCORD_BOT_TOKEN"]
+    },
+    {
+      "name": "notion",
+      "description": "Notion workspace, pages, databases, and content management",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "productivity",
+      "capabilities": ["notion", "pages", "databases", "content"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-notion", "default": true, "description": "Official Notion MCP server via NPX"}
+      ],
+      "required_env": ["NOTION_API_KEY"]
+    },
+    {
+      "name": "linear",
+      "description": "Linear project management, issues, and team workflows",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "productivity",
+      "capabilities": ["linear", "issues", "projects", "workflows"],
+      "transports": [
+        {"type": "npx", "package": "mcp-server-linear", "default": true, "description": "Linear MCP server via NPX"}
+      ],
+      "required_env": ["LINEAR_API_KEY"]
+    },
+    {
+      "name": "airtable",
+      "description": "Airtable base, table, and record operations",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "productivity",
+      "capabilities": ["airtable", "database", "records", "tables"],
+      "transports": [
+        {"type": "npx", "package": "mcp-server-airtable", "default": true, "description": "Airtable MCP server via NPX"}
+      ],
+      "required_env": ["AIRTABLE_API_KEY"]
+    },
+    {
+      "name": "google-drive",
+      "description": "Google Drive file search, read, and management",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "productivity",
+      "capabilities": ["google-drive", "files", "search", "documents"],
+      "transports": [
+        {"type": "npx", "package": "mcp-server-google-drive", "default": true, "description": "Google Drive MCP server via NPX"}
+      ],
+      "required_env": ["GOOGLE_APPLICATION_CREDENTIALS"]
+    },
+    {
+      "name": "memory",
+      "description": "Knowledge graph memory server (memini-ai compatible)",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "ai",
+      "capabilities": ["memory", "knowledge-graph", "entities", "relations"],
+      "transports": [
+        {"type": "uvx", "package": "mcp-server-memory", "default": true, "description": "Official Memory MCP server via UVX (Python)"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "sequential-thinking",
+      "description": "Sequential reasoning and thought chain management",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "ai",
+      "capabilities": ["thinking", "reasoning", "chains", "planning"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-sequential-thinking", "default": true, "description": "Official Sequential Thinking MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "everything",
+      "description": "Reference MCP server for testing and development (echoes all tools)",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "demo",
+      "capabilities": ["echo", "sampling", "tools", "demo"],
+      "transports": [
+        {"type": "npx", "package": "@modelcontextprotocol/server-everything", "default": true, "description": "Official Everything MCP server via NPX"}
+      ],
+      "required_env": []
+    },
+    {
+      "name": "markitdown",
+      "description": "Convert documents and files to Markdown",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "category": "conversion",
+      "capabilities": ["markitdown", "conversion", "markdown", "documents"],
+      "transports": [
+        {"type": "uvx", "package": "markitdown-mcp", "default": true, "description": "MarkItDown MCP server via UVX (Python)"},
+        {"type": "local", "package": "markitdown", "description": "Local binary (pip install markitdown-mcp)"}
+      ],
+      "required_env": []
+    }
+  ],
+  "_provenance": "Package names follow @modelcontextprotocol/server-* for npx, mcp-* or mcp-server-* for uvx. Docker images assumed mcp/<name>. Official MCP servers use @modelcontextprotocol/* scope. Community servers use mcp-server-* prefix."
+}

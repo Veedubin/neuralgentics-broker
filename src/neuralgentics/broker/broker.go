@@ -480,3 +480,106 @@ func (b *Broker) SetTools(serverName string, tools []types.ToolSummary) {
 	entry.Tools = tools
 	b.registry.UpdateEntry(serverName, entry)
 }
+
+// ─── Curated Catalog Methods (T-CATALOG-001) ─────────────────────────────────────
+
+// DiscoverCatalog returns the list of curated MCP servers not currently registered
+// in the broker's registry. If role is non-empty, only servers the role can access
+// are returned.
+func (b *Broker) DiscoverCatalog(role string) ([]catalog.CuratedServer, error) {
+	cat, err := catalog.LoadCuratedCatalog()
+	if err != nil {
+		return nil, fmt.Errorf("load catalog: %w", err)
+	}
+	registered := b.registry.List()
+	registeredNames := make(map[string]bool, len(registered))
+	for _, s := range registered {
+		registeredNames[s.Name] = true
+	}
+	var available []catalog.CuratedServer
+	for _, s := range cat.Servers {
+		if registeredNames[s.Name] {
+			continue
+		}
+		if role != "" && !b.access.CanAccess(role, s.Name) {
+			continue
+		}
+		available = append(available, s)
+	}
+	return available, nil
+}
+
+// ActivateFromCatalog registers AND starts a curated MCP server using the
+// default transport (or transportIndex if >= 0). The server must NOT already
+// be registered. Returns the transport.Type that was activated.
+func (b *Broker) ActivateFromCatalog(role, name string, transportIndex int) (string, error) {
+	cat, err := catalog.LoadCuratedCatalog()
+	if err != nil {
+		return "", fmt.Errorf("load catalog: %w", err)
+	}
+	var found *catalog.CuratedServer
+	for i := range cat.Servers {
+		if cat.Servers[i].Name == name {
+			found = &cat.Servers[i]
+			break
+		}
+	}
+	if found == nil {
+		return "", fmt.Errorf("server %q not found in curated catalog", name)
+	}
+	if role != "" && !b.access.CanAccess(role, name) {
+		return "", access.ErrUnauthorized{Role: role, Server: name, Reason: "role cannot access this catalog server"}
+	}
+	if len(found.Transports) == 0 {
+		return "", fmt.Errorf("server %q has no transports declared", name)
+	}
+
+	// Convert curated transports to MCPServerConfig.
+	transports := make([]types.TransportConfig, len(found.Transports))
+	for i, ct := range found.Transports {
+		transports[i] = types.TransportConfig{
+			Type:        types.TransportType(ct.Type),
+			Package:     ct.Package,
+			Args:        ct.Args,
+			Env:         ct.Env,
+			URL:         ct.URL,
+			Default:     ct.Default,
+			Description: ct.Description,
+		}
+	}
+	cfg := types.MCPServerConfig{
+		Name:         found.Name,
+		Transports:   transports,
+		Description:  found.Description,
+		Capabilities: found.Capabilities,
+	}
+	if err := b.RegisterMCPServer(cfg); err != nil {
+		return "", fmt.Errorf("register %q: %w", name, err)
+	}
+	return b.ActivateMCPServerWithTransport(name, cfg, transportIndex)
+}
+
+// DeactivateMCPServer stops a running server and removes it from the registry.
+// Idempotent: returns nil if the server was not registered.
+func (b *Broker) DeactivateMCPServer(name string) error {
+	if _, ok := b.registry.Get(name); !ok {
+		return nil
+	}
+	return b.DeregisterServer(name)
+}
+
+// ListTransports returns the available transports for a curated MCP server,
+// annotated with availability based on whether the required binary is on PATH.
+func (b *Broker) ListTransports(name string) (transports []catalog.CuratedTransport, unavailable []string, err error) {
+	cat, err := catalog.LoadCuratedCatalog()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load catalog: %w", err)
+	}
+	for _, s := range cat.Servers {
+		if s.Name == name {
+			_, unavailable = catalog.CheckTransportAvailability(s.Transports)
+			return s.Transports, unavailable, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("server %q not found in curated catalog", name)
+}
