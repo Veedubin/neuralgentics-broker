@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
+	"neuralgentics-broker/src/neuralgentics/broker/launcher"
 	"neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
@@ -342,4 +345,112 @@ func (p *MCPProxy) sendRPC(stdin io.Writer, method string, params map[string]any
 		p.mu.Unlock()
 		return nil, fmt.Errorf("timeout waiting for response to %q (id=%d)", method, id)
 	}
+}
+
+// ─── Client Interface and Dispatch (T-HTTP-TRANSPORT) ─────────────────────────
+
+// Client is the interface that both MCPProxy (stdio) and HTTPClient (HTTP/SSE) implement.
+// It exposes the methods the broker needs to manage a server's lifecycle and route calls.
+type Client interface {
+	// Initialize performs the MCP handshake (initialize + initialized for stdio,
+	// or initialize over HTTP for remote servers).
+	Initialize(ctx context.Context) error
+	// ListTools requests the tool list from the server.
+	ListTools(ctx context.Context) ([]types.ToolSummary, error)
+	// Call invokes a tool with the given arguments.
+	Call(ctx context.Context, name string, args map[string]any) (map[string]any, error)
+}
+
+// NewClientForConfig returns the appropriate Client for a given ServerConfig.
+// For stdio servers, returns a stdioClientAdapter that wraps MCPProxy.
+// For http/sse servers, returns an HTTPClient.
+func NewClientForConfig(config types.ServerConfig) (Client, error) {
+	switch config.Type {
+	case "stdio":
+		return &stdioClientAdapter{config: config}, nil
+	case "http", "sse":
+		url := config.Env["NEURALGENTICS_MCP_URL"]
+		if url == "" {
+			return nil, fmt.Errorf("http/sse server %q requires NEURALGENTICS_MCP_URL env var", config.Name)
+		}
+		authHeader := ""
+		if v, ok := config.Env["NEURALGENTICS_MCP_AUTH"]; ok {
+			authHeader = v
+		}
+		return NewHTTPClient(url, authHeader), nil
+	default:
+		return nil, fmt.Errorf("unknown server type: %q", config.Type)
+	}
+}
+
+// stdioClientAdapter wraps the stdio MCPProxy lifecycle (Launch + Initialize + ListTools + Call)
+// into the Client interface. This lets the broker use a single code path for both stdio and HTTP.
+type stdioClientAdapter struct {
+	config   types.ServerConfig
+	proxy    *MCPProxy
+	stdin    io.WriteCloser
+	stdout   io.ReadCloser
+	launched bool
+}
+
+// Initialize launches the subprocess, starts the reader, and performs the MCP handshake.
+func (s *stdioClientAdapter) Initialize(_ context.Context) error {
+	cmd, stdin, stdout, err := launcher.BuildCommand(s.config)
+	if err != nil {
+		return fmt.Errorf("build stdio command for %q: %w", s.config.Name, err)
+	}
+	cmd.Env = buildEnv(s.config)
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start subprocess for %q: %w", s.config.Name, err)
+	}
+
+	s.stdin = stdin
+	s.stdout = stdout
+	s.proxy = NewMCPProxy()
+	s.proxy.StartReader(stdout)
+	s.launched = true
+
+	if err := s.proxy.Initialize(s.config.Name, stdin, stdout); err != nil {
+		s.proxy.Stop()
+		return fmt.Errorf("initialize %q: %w", s.config.Name, err)
+	}
+	return nil
+}
+
+// ListTools requests the tool list from the stdio server.
+func (s *stdioClientAdapter) ListTools(_ context.Context) ([]types.ToolSummary, error) {
+	if !s.launched {
+		return nil, fmt.Errorf("stdio client not initialized")
+	}
+	return s.proxy.ListTools(s.config.Name, s.stdin, s.stdout)
+}
+
+// Call invokes a tool on the stdio server.
+func (s *stdioClientAdapter) Call(_ context.Context, name string, args map[string]any) (map[string]any, error) {
+	if !s.launched {
+		return nil, fmt.Errorf("stdio client not initialized")
+	}
+	params := map[string]any{"name": name, "arguments": args}
+	return s.proxy.Call(s.config.Name, "tools/call", params, s.stdin, s.stdout)
+}
+
+// buildEnv constructs the environment for a subprocess from config.Env plus
+// the current process environment.
+func buildEnv(config types.ServerConfig) []string {
+	env := execEnv()
+	for k, v := range config.Env {
+		// Skip NEURALGENTICS_MCP_URL and NEURALGENTICS_MCP_AUTH which are
+		// HTTP-only env vars — not relevant to stdio subprocesses.
+		if k == "NEURALGENTICS_MCP_URL" || k == "NEURALGENTICS_MCP_AUTH" {
+			continue
+		}
+		env = append(env, k+"="+v)
+	}
+	return env
+}
+
+// execEnv returns the current process environment as a slice.
+func execEnv() []string {
+	return os.Environ()
 }

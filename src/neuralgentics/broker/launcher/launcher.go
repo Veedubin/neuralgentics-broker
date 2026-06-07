@@ -49,7 +49,7 @@ func (l *Launcher) Start(config types.ServerConfig) error {
 		return fmt.Errorf("server %q not registered", config.Name)
 	}
 
-	cmd, stdinPipe, stdoutPipe, err := buildCommand(config)
+	cmd, stdinPipe, stdoutPipe, err := BuildCommand(config)
 	if err != nil {
 		return fmt.Errorf("build command for %q: %w", config.Name, err)
 	}
@@ -162,12 +162,13 @@ func (l *Launcher) clearAfterExit(name string) {
 // It does NOT register or start the process — call Launcher.Start() separately.
 func BuildCommandForTransport(t types.TransportConfig, name, description string, capabilities []string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	sc := t.ToServerConfig(name, description, capabilities)
-	return buildCommand(sc)
+	return BuildCommand(sc)
 }
 
-// buildCommand constructs an exec.Cmd for the given server config.
+// BuildCommand constructs an exec.Cmd for the given server config.
 // For stdio-type servers, it sets up stdin/stdout pipes.
-func buildCommand(config types.ServerConfig) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+// Exported for use by the proxy package's stdioClientAdapter.
+func BuildCommand(config types.ServerConfig) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	cmd := exec.Command(config.Command, config.Args...)
 
 	// Set environment variables.

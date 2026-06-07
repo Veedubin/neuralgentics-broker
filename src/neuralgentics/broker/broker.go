@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"neuralgentics-broker/src/neuralgentics/broker/access"
@@ -24,6 +25,8 @@ type Broker struct {
 	access      *access.AccessControl
 	builder     *catalog.Builder
 	toolExposer ToolExposer
+	httpClients map[string]proxy.Client // HTTP/SSE clients keyed by server name
+	httpMu      sync.RWMutex            // protects httpClients
 }
 
 // ToolExposer is an interface for checking and recording tool exposure
@@ -49,11 +52,12 @@ func NewBroker() *Broker {
 	reg := registry.NewRegistry()
 	ac := access.NewAccessControl(access.DefaultServerRoles)
 	return &Broker{
-		registry: reg,
-		launcher: launcher.NewLauncher(reg),
-		proxy:    proxy.NewMCPProxy(),
-		access:   ac,
-		builder:  catalog.NewBuilderWithAccess(reg, ac),
+		registry:    reg,
+		launcher:    launcher.NewLauncher(reg),
+		proxy:       proxy.NewMCPProxy(),
+		access:      ac,
+		builder:     catalog.NewBuilderWithAccess(reg, ac),
+		httpClients: make(map[string]proxy.Client),
 	}
 }
 
@@ -204,11 +208,14 @@ func (b *Broker) ReloadServerWithConfig(name string, newConfig types.ServerConfi
 }
 
 // DeregisterServer removes a server from the registry and stops it if running.
-// It does NOT stop the shared proxy — the proxy is broker-level, not server-level,
-// and stopping it would kill the async reader for all other running servers.
-// The server process is stopped via launcher, and its stdout will EOF naturally,
-// causing the readLoop goroutine to exit cleanly.
+// It also cleans up any HTTP client associated with the server.
+// The shared proxy is NOT stopped — it is broker-level and used by other servers.
 func (b *Broker) DeregisterServer(name string) error {
+	// Clean up HTTP client if present.
+	b.httpMu.Lock()
+	delete(b.httpClients, name)
+	b.httpMu.Unlock()
+
 	// Stop the server process (stdout EOF will cause reader to exit).
 	_ = b.launcher.Stop(name)
 
@@ -251,6 +258,37 @@ func (b *Broker) ActivateMCPServerWithTransport(name string, config types.MCPSer
 
 		// Build a temporary ServerConfig for this transport only.
 		sc := transport.ToServerConfig(name, config.Description, config.Capabilities)
+
+		// HTTP/SSE transport: use HTTPClient directly.
+		if sc.Type == "http" || sc.Type == "sse" {
+			client, err := proxy.NewClientForConfig(sc)
+			if err != nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := client.Initialize(ctx); err != nil {
+				continue
+			}
+			tools, err := client.ListTools(ctx)
+			if err != nil {
+				continue
+			}
+
+			// Update registry entry with the chosen config and tools.
+			entry.Config = sc
+			entry.Tools = tools
+			b.registry.UpdateEntry(name, entry)
+
+			// Store the HTTP client for future Call() operations.
+			b.httpMu.Lock()
+			b.httpClients[name] = client
+			b.httpMu.Unlock()
+
+			return string(transport.Type), nil
+		}
+
+		// Stdio transport: use the existing subprocess-based activation.
 		// Replace entry.Config with the chosen transport's legacy form.
 		oldConfig := entry.Config
 		entry.Config = sc
@@ -351,6 +389,8 @@ func (b *Broker) HealthDeep() map[string]string {
 // Call sends a JSON-RPC tool call to a registered server.
 // It checks access control first; if the role does not have permission,
 // it returns access.ErrUnauthorized with available server hints.
+// For HTTP/SSE servers, it uses the stored HTTPClient; for stdio servers,
+// it uses the shared MCPProxy.
 func (b *Broker) Call(role string, serverName string, toolName string, args map[string]any) (map[string]any, error) {
 	// Check access control.
 	if !b.access.CanAccess(role, serverName) {
@@ -363,6 +403,18 @@ func (b *Broker) Call(role string, serverName string, toolName string, args map[
 		}
 	}
 
+	// Check for an HTTP client first (HTTP/SSE transport).
+	b.httpMu.RLock()
+	client, isHTTP := b.httpClients[serverName]
+	b.httpMu.RUnlock()
+
+	if isHTTP {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return client.Call(ctx, toolName, args)
+	}
+
+	// Stdio transport: use the shared proxy.
 	entry, ok := b.registry.Get(serverName)
 	if !ok {
 		return nil, fmt.Errorf("server %q not found", serverName)
