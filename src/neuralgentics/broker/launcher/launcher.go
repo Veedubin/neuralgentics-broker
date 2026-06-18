@@ -93,9 +93,13 @@ func (l *Launcher) Stop(name string) error {
 	}
 
 	// Give the process time to shut down gracefully.
+	// Capture the process handle by value — entry.Process is a shared
+	// pointer that clearAfterExit sets to nil. If the goroutine below
+	// reads entry.Process after clearAfterExit runs, it dereferences nil.
 	done := make(chan error, 1)
+	proc := entry.Process
 	go func() {
-		_, waitErr := entry.Process.Wait()
+		_, waitErr := proc.Wait()
 		done <- waitErr
 	}()
 
