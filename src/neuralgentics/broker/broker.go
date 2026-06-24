@@ -24,14 +24,15 @@ import (
 // It coordinates the registry, launcher, proxy, and access control
 // to manage MCP server lifecycles and route tool calls.
 type Broker struct {
-	registry    *registry.Registry
-	launcher    *launcher.Launcher
-	proxy       *proxy.MCPProxy
-	access      *access.AccessControl
-	builder     *catalog.Builder
-	toolExposer ToolExposer
-	httpClients map[string]proxy.Client // HTTP/SSE clients keyed by server name
-	httpMu      sync.RWMutex            // protects httpClients
+	registry      *registry.Registry
+	launcher      *launcher.Launcher
+	proxy         *proxy.MCPProxy
+	access        *access.AccessControl
+	builder       *catalog.Builder
+	toolExposer   ToolExposer
+	httpClients   map[string]proxy.Client // HTTP/SSE clients keyed by server name
+	httpMu        sync.RWMutex            // protects httpClients
+	WorkspaceRoot string                  // absolute path to project root for skill catalog reads
 }
 
 // ToolExposer is an interface for checking and recording tool exposure
@@ -53,16 +54,26 @@ type ToolExposure struct {
 
 // NewBroker creates a new Broker with an empty registry, launcher, proxy,
 // and default access control with DefaultServerRoles.
+// The WorkspaceRoot is set to the current working directory.
+// For a specific workspace root, use NewBrokerWithWorkspace.
 func NewBroker() *Broker {
+	cwd, _ := os.Getwd()
+	return NewBrokerWithWorkspace(cwd)
+}
+
+// NewBrokerWithWorkspace creates a new Broker with the given workspace root.
+// The workspaceRoot is used for skill catalog reads and other filesystem operations.
+func NewBrokerWithWorkspace(workspaceRoot string) *Broker {
 	reg := registry.NewRegistry()
 	ac := access.NewAccessControl(access.DefaultServerRoles)
 	return &Broker{
-		registry:    reg,
-		launcher:    launcher.NewLauncher(reg),
-		proxy:       proxy.NewMCPProxy(),
-		access:      ac,
-		builder:     catalog.NewBuilderWithAccess(reg, ac),
-		httpClients: make(map[string]proxy.Client),
+		registry:      reg,
+		launcher:      launcher.NewLauncher(reg),
+		proxy:         proxy.NewMCPProxy(),
+		access:        ac,
+		builder:       catalog.NewBuilderWithAccess(reg, ac),
+		httpClients:   make(map[string]proxy.Client),
+		WorkspaceRoot: workspaceRoot,
 	}
 }
 
@@ -470,6 +481,14 @@ func (b *Broker) MatchIntent(role string, intentStr string) (*intent.ToolMatch, 
 // If role is empty, all servers are included.
 func (b *Broker) BuildServerCatalog(role string) *catalog.ServerCatalog {
 	cat := b.builder.Build(role)
+	return &cat
+}
+
+// BuildSkills creates a SkillCatalog filtered by role.
+// If role is empty, all skills are included.
+// Uses the broker's WorkspaceRoot for filesystem operations.
+func (b *Broker) BuildSkills(role string) *catalog.SkillCatalog {
+	cat := b.builder.BuildSkills(role, b.WorkspaceRoot)
 	return &cat
 }
 

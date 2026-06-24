@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	b := broker.NewBroker()
+	b := broker.NewBrokerWithWorkspace(".")
 
 	// Register example test servers with descriptions and capabilities.
 	testServers := []types.ServerConfig{
