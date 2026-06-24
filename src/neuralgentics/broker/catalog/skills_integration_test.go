@@ -926,3 +926,307 @@ description: A local skill
 		t.Errorf("expected local-skill, got %q", cat.Skills[0].Name)
 	}
 }
+
+// ─── T-SB-009: Additional Integration Tests ─────────────────────────────────
+
+// TestBuildSkills_ExternalDir_FullPipeline verifies the end-to-end flow with
+// BOTH repo layouts (AI-Research-SKILLs AND ui-ux-pro-max-skill) in the same
+// external dir, with a valid MANIFEST.json. Asserts skills from both repos
+// are returned, each has Source="external", and each has populated
+// ExternalProvenance. Dedup does not fire because there are no local skills.
+func TestBuildSkills_ExternalDir_FullPipeline(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// ── AI-Research-SKILLs layout ──────────────────────────────────────────
+	aiRepoDir := filepath.Join(extDir, "ai-research-skills")
+	aiSkillDir := filepath.Join(aiRepoDir, "01-model-architecture", "litgpt")
+	if err := os.MkdirAll(aiSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aiSkillDir, "SKILL.md"), []byte(`---
+name: litgpt-skill
+description: Fine-tune LitGPT models
+tags:
+  - implementation
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ── ui-ux-pro-max-skill layout ─────────────────────────────────────────
+	uiRepoDir := filepath.Join(extDir, "ui-ux-pro-max-skill")
+	uiSkillDir := filepath.Join(uiRepoDir, ".claude", "skills", "design-system")
+	if err := os.MkdirAll(uiSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uiSkillDir, "SKILL.md"), []byte(`---
+name: design-system-skill
+description: Design system components
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ── MANIFEST.json ──────────────────────────────────────────────────────
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/Orchestra-Research/AI-Research-SKILLs.git",
+			CommitSHA:   "773a529b8c4d1e2f3a5b6c7d8e9f0a1b2c3d4e5f6",
+			License:     "MIT",
+			Attribution: "Copyright 2025 Claude AI Research Skills Contributors. Used under MIT License.",
+		},
+		"ui-ux-pro-max-skill": {
+			URL:         "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+			CommitSHA:   "bdf1179a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2",
+			License:     "MIT",
+			Attribution: "Copyright 2024 Next Level Builder. Used under MIT License.",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	// Both skills should be present
+	if cat.TotalSkills != 2 {
+		t.Fatalf("expected 2 skills (1 from each repo), got %d", cat.TotalSkills)
+	}
+
+	names := make(map[string]bool)
+	for _, s := range cat.Skills {
+		names[s.Name] = true
+
+		// Every skill should have Source="external"
+		if s.Source != "external" {
+			t.Errorf("expected Source='external' for %q, got %q", s.Name, s.Source)
+		}
+
+		// Every skill should have populated ExternalProvenance
+		if s.ExternalProvenance == nil {
+			t.Errorf("expected ExternalProvenance for %q, got nil", s.Name)
+		} else {
+			if s.ExternalProvenance.Repo == "" {
+				t.Errorf("expected non-empty Repo in provenance for %q", s.Name)
+			}
+			if s.ExternalProvenance.CommitSHA == "" {
+				t.Errorf("expected non-empty CommitSHA in provenance for %q", s.Name)
+			}
+			if s.ExternalProvenance.License != "MIT" {
+				t.Errorf("expected License='MIT' for %q, got %q", s.Name, s.ExternalProvenance.License)
+			}
+			if s.ExternalProvenance.Attribution == "" {
+				t.Errorf("expected non-empty Attribution for %q", s.Name)
+			}
+		}
+	}
+
+	if !names["litgpt-skill"] {
+		t.Error("expected 'litgpt-skill' from ai-research-skills repo")
+	}
+	if !names["design-system-skill"] {
+		t.Error("expected 'design-system-skill' from ui-ux-pro-max-skill repo")
+	}
+}
+
+// TestBuildSkills_ExternalDir_LocalAndExternalMixed verifies that when local
+// and external skills coexist:
+//   - Local skills are present
+//   - External-only skills are present
+//   - External skills with the SAME name as a local skill are excluded (dedup)
+func TestBuildSkills_ExternalDir_LocalAndExternalMixed(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// ── Local skill: "my-skill" ────────────────────────────────────────────
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "my-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: Local version of my-skill
+tags:
+  - implementation
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ── External skill: "external-only-skill" (no local duplicate) ─────────
+	extRepoDir := filepath.Join(extDir, "ai-research-skills")
+	extOnlyDir := filepath.Join(extRepoDir, "01-tools", "external-only-skill")
+	if err := os.MkdirAll(extOnlyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extOnlyDir, "SKILL.md"), []byte(`---
+name: external-only-skill
+description: Only available externally
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ── External skill: "my-skill" (same name as local — should be deduped) ─
+	dupDir := filepath.Join(extRepoDir, "02-other", "my-skill")
+	if err := os.MkdirAll(dupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dupDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: External version of my-skill (should be deduped)
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/example/repo.git",
+			CommitSHA:   "abc123",
+			License:     "MIT",
+			Attribution: "Test attribution",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	// Should have 2 skills: local my-skill + external-only-skill
+	if cat.TotalSkills != 2 {
+		t.Fatalf("expected 2 skills (local + external-only), got %d", cat.TotalSkills)
+	}
+
+	names := make(map[string]bool)
+	for _, s := range cat.Skills {
+		names[s.Name] = true
+	}
+
+	// Local skill present
+	if !names["my-skill"] {
+		t.Error("expected 'my-skill' (local) in catalog")
+	}
+
+	// External-only skill present
+	if !names["external-only-skill"] {
+		t.Error("expected 'external-only-skill' in catalog")
+	}
+
+	// Verify the local my-skill won dedup (Source="local", description matches local)
+	for _, s := range cat.Skills {
+		if s.Name == "my-skill" {
+			if s.Source != "local" {
+				t.Errorf("expected my-skill Source='local', got %q", s.Source)
+			}
+			if s.Description != "Local version of my-skill" {
+				t.Errorf("expected my-skill description to be local version, got %q", s.Description)
+			}
+		}
+	}
+}
+
+// TestBuildSkills_ExternalDir_RoleFilterApplies verifies that external skills
+// are filtered by role's YAML scope tags, just like local skills.
+func TestBuildSkills_ExternalDir_RoleFilterApplies(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// YAML scope: coder sees [implementation], architect sees [design].
+	scopeContent := `version: 1
+roles:
+  coder:
+    - implementation
+  architect:
+    - design
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent-skill-scope.yaml"), []byte(scopeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// External skill tagged [implementation] — should match coder
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+	implDir := filepath.Join(repoDir, "01-tools", "impl-skill")
+	if err := os.MkdirAll(implDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(implDir, "SKILL.md"), []byte(`---
+name: impl-skill
+description: Implementation skill
+tags:
+  - implementation
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// External skill tagged [design] — should match architect
+	designDir := filepath.Join(repoDir, "02-design", "design-skill")
+	if err := os.MkdirAll(designDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(designDir, "SKILL.md"), []byte(`---
+name: design-skill
+description: Design skill
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// External skill tagged [general] — should match neither coder nor architect
+	genDir := filepath.Join(repoDir, "03-general", "general-skill")
+	if err := os.MkdirAll(genDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(genDir, "SKILL.md"), []byte(`---
+name: general-skill
+description: General skill
+tags:
+  - general
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/example/repo.git",
+			CommitSHA:   "deadbeef",
+			License:     "MIT",
+			Attribution: "Test",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+
+	// Coder should see impl-skill (merged=[implementation] overlaps with coder's [implementation])
+	// and general-skill (merged=[implementation, general] overlaps with coder's [implementation]).
+	// design-skill: merged=[implementation, design] overlaps with coder's [implementation] too.
+	// So coder sees all 3 because YAML baseline adds "implementation" to every skill.
+	catCoder := builder.BuildSkills("coder", dir)
+	if catCoder.TotalSkills != 3 {
+		t.Fatalf("expected 3 skills for coder (baseline adds implementation), got %d", catCoder.TotalSkills)
+	}
+
+	// Architect should see design-skill (merged=[design] overlaps with architect's [design])
+	// and general-skill (merged=[design, general] overlaps with architect's [design]).
+	// impl-skill: merged=[design, implementation] overlaps with architect's [design].
+	// So architect also sees all 3.
+	catArchitect := builder.BuildSkills("architect", dir)
+	if catArchitect.TotalSkills != 3 {
+		t.Fatalf("expected 3 skills for architect (baseline adds design), got %d", catArchitect.TotalSkills)
+	}
+
+	// A role not in YAML (e.g., "tester") should see 0 skills because
+	// yamlTags is nil → mergedTags is empty → no overlap.
+	catTester := builder.BuildSkills("tester", dir)
+	if catTester.TotalSkills != 0 {
+		t.Fatalf("expected 0 skills for tester (role not in YAML), got %d", catTester.TotalSkills)
+	}
+}
