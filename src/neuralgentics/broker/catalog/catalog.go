@@ -42,28 +42,56 @@ type ToolSummary struct {
 	Description string
 }
 
-// Builder constructs ServerCatalogs from the registry, with optional
-// role-based access filtering.
+// Builder constructs ServerCatalogs and SkillCatalogs from the registry,
+// filesystem, and optional external skill directories, with role-based
+// access filtering.
 type Builder struct {
-	registry *registry.Registry
-	ac       *access.AccessControl
+	registry      *registry.Registry
+	ac            *access.AccessControl
+	externalDir   string // path to ~/.neuralgentics/external_skills (or empty if disabled)
+	manifest      map[string]ExternalProvenance
+	workspaceRoot string // tracked for the existing local skills walk
 }
 
 // NewBuilder creates a new catalog Builder backed by the given registry.
 // It uses DefaultAccessControl for role-based filtering.
+// External skills are NOT loaded (externalDir is empty).
 func NewBuilder(reg *registry.Registry) *Builder {
 	return &Builder{
-		registry: reg,
-		ac:       access.DefaultAccessControl(),
+		registry:    reg,
+		ac:          access.DefaultAccessControl(),
+		externalDir: "",
+		manifest:    nil,
 	}
 }
 
 // NewBuilderWithAccess creates a catalog Builder with a custom AccessControl.
+// External skills are NOT loaded (externalDir is empty).
 func NewBuilderWithAccess(reg *registry.Registry, ac *access.AccessControl) *Builder {
 	return &Builder{
-		registry: reg,
-		ac:       ac,
+		registry:    reg,
+		ac:          ac,
+		externalDir: "",
+		manifest:    nil,
 	}
+}
+
+// NewBuilderWithExternal creates a Builder that also walks an external skills dir
+// (typically ~/.neuralgentics/external_skills). The externalDir is optional; if
+// empty, no external skills are included. The MANIFEST.json inside externalDir
+// is loaded at construction time; if missing, external skills are silently skipped.
+func NewBuilderWithExternal(reg *registry.Registry, ac *access.AccessControl, workspaceRoot, externalDir string) *Builder {
+	b := NewBuilderWithAccess(reg, ac)
+	b.workspaceRoot = workspaceRoot
+	b.externalDir = externalDir
+	b.manifest = loadExternalManifest(externalDir)
+	return b
+}
+
+// SetExternalDir sets or updates the external skills directory and reloads the manifest.
+func (b *Builder) SetExternalDir(externalDir string) {
+	b.externalDir = externalDir
+	b.manifest = loadExternalManifest(externalDir)
 }
 
 // Build creates a ServerCatalog filtered by role.

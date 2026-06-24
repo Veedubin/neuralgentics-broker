@@ -6,6 +6,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -407,5 +408,521 @@ func TestBuildSkills_ParseFrontMatter_Malformed(t *testing.T) {
 	_, _, err := parseSkillFrontMatter(content)
 	if err == nil {
 		t.Error("expected error for malformed front-matter (no closing ---), got nil")
+	}
+}
+
+// ─── T-SB-009: External Skill Tests ─────────────────────────────────────────
+
+// writeManifest writes a MANIFEST.json to the given external dir.
+func writeManifest(t *testing.T, externalDir string, repos map[string]ExternalRepoState) {
+	t.Helper()
+	manifest := ExternalManifest{
+		Version:   1,
+		UpdatedAt: "2026-06-24T12:00:00Z",
+		HomeDir:   externalDir,
+		Repos:     repos,
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(externalDir, "MANIFEST.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBuildSkills_ExternalDir_OrchestratorSeesAll verifies that the orchestrator
+// sees both local and external skills when externalDir is set.
+func TestBuildSkills_ExternalDir_OrchestratorSeesAll(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// Create a local skill.
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "local-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: local-skill
+description: A local skill
+tags:
+  - implementation
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an external skill inside the repo-named subdirectory.
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+	extSkillDir := filepath.Join(repoDir, "01-tools", "ext-skill")
+	if err := os.MkdirAll(extSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extSkillDir, "SKILL.md"), []byte(`---
+name: ext-skill
+description: An external skill
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write manifest.
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/Orchestra-Research/AI-Research-SKILLs.git",
+			CommitSHA:   "abc123def456",
+			License:     "MIT",
+			Attribution: "Copyright 2025 Contributors. Used under MIT License.",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	if cat.TotalSkills < 2 {
+		t.Fatalf("expected at least 2 skills (local + external), got %d", cat.TotalSkills)
+	}
+
+	names := make(map[string]bool)
+	for _, s := range cat.Skills {
+		names[s.Name] = true
+	}
+	if !names["local-skill"] {
+		t.Error("expected local-skill in catalog")
+	}
+	if !names["ext-skill"] {
+		t.Error("expected ext-skill in catalog")
+	}
+
+	// Verify ext-skill has Source="external" and provenance.
+	for _, s := range cat.Skills {
+		if s.Name == "ext-skill" {
+			if s.Source != "external" {
+				t.Errorf("expected ext-skill Source='external', got %q", s.Source)
+			}
+			if s.ExternalProvenance == nil {
+				t.Error("expected ext-skill to have ExternalProvenance, got nil")
+			} else if s.ExternalProvenance.Repo != "ai-research-skills" {
+				t.Errorf("expected provenance Repo='ai-research-skills', got %q", s.ExternalProvenance.Repo)
+			}
+		}
+		if s.Name == "local-skill" {
+			if s.Source != "local" {
+				t.Errorf("expected local-skill Source='local', got %q", s.Source)
+			}
+			if s.ExternalProvenance != nil {
+				t.Errorf("expected local-skill ExternalProvenance=nil, got %+v", s.ExternalProvenance)
+			}
+		}
+	}
+}
+
+// TestBuildSkills_ExternalDir_RoleFiltering verifies that external skills
+// are filtered by role just like local skills.
+func TestBuildSkills_ExternalDir_RoleFiltering(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// Create scope YAML: coder sees [implementation].
+	scopeContent := `version: 1
+roles:
+  coder:
+    - implementation
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent-skill-scope.yaml"), []byte(scopeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create external skill with [design] tag only, under ai-research-skills repo.
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+	extSkillDir := filepath.Join(repoDir, "01-tools", "design-skill")
+	if err := os.MkdirAll(extSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extSkillDir, "SKILL.md"), []byte(`---
+name: design-skill
+description: A design skill
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/example/repo.git",
+			CommitSHA:   "deadbeef",
+			License:     "MIT",
+			Attribution: "Test attribution",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("coder", dir)
+
+	// coder's YAML tags are [implementation]. External skill has [design].
+	// After merge: merged=[implementation, design] (baseline + front-matter).
+	// Overlap check: coder baseline [implementation] intersects [implementation, design] → YES.
+	// So coder SHOULD see the design-skill (because implementation is in both).
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill for coder (baseline adds implementation tag), got %d", cat.TotalSkills)
+	}
+}
+
+// TestBuildSkills_ExternalDir_ProvenanceStamped verifies that all provenance
+// fields are correctly populated from MANIFEST.json.
+func TestBuildSkills_ExternalDir_ProvenanceStamped(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+	extSkillDir := filepath.Join(repoDir, "01-tools", "provenance-skill")
+	if err := os.MkdirAll(extSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extSkillDir, "SKILL.md"), []byte(`---
+name: provenance-skill
+description: Skill with provenance
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/Orchestra-Research/AI-Research-SKILLs.git",
+			CommitSHA:   "773a529b8c4d1e2f3a5b6c7d8e9f0a1b2c3d4e5f6",
+			License:     "MIT",
+			Attribution: "Copyright 2025 Claude AI Research Skills Contributors. Used under MIT License.",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("", dir) // empty role = see all
+
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill, got %d", cat.TotalSkills)
+	}
+	p := cat.Skills[0].ExternalProvenance
+	if p == nil {
+		t.Fatal("expected ExternalProvenance, got nil")
+	}
+	if p.Repo != "ai-research-skills" {
+		t.Errorf("expected Repo='ai-research-skills', got %q", p.Repo)
+	}
+	if p.CommitSHA != "773a529b8c4d1e2f3a5b6c7d8e9f0a1b2c3d4e5f6" {
+		t.Errorf("expected CommitSHA, got %q", p.CommitSHA)
+	}
+	if p.License != "MIT" {
+		t.Errorf("expected License='MIT', got %q", p.License)
+	}
+	if p.Attribution != "Copyright 2025 Claude AI Research Skills Contributors. Used under MIT License." {
+		t.Errorf("expected Attribution, got %q", p.Attribution)
+	}
+}
+
+// TestBuildSkills_ExternalDir_DedupPrefersLocal verifies that a local skill
+// with the same name as an external skill wins the dedup.
+func TestBuildSkills_ExternalDir_DedupPrefersLocal(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// Local skill named "test-skill".
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "test-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: test-skill
+description: Local version
+tags:
+  - implementation
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// External skill also named "test-skill", under ai-research-skills repo.
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+	extSkillDir := filepath.Join(repoDir, "01-tools", "test-skill")
+	if err := os.MkdirAll(extSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extSkillDir, "SKILL.md"), []byte(`---
+name: test-skill
+description: External version
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/example/repo.git",
+			CommitSHA:   "abc123",
+			License:     "MIT",
+			Attribution: "Test",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill (dedup), got %d", cat.TotalSkills)
+	}
+	if cat.Skills[0].Description != "Local version" {
+		t.Errorf("expected local skill to win dedup, got description %q", cat.Skills[0].Description)
+	}
+	if cat.Skills[0].Source != "local" {
+		t.Errorf("expected Source='local', got %q", cat.Skills[0].Source)
+	}
+}
+
+// TestBuildSkills_ExternalDir_MissingManifestSkipsExternal verifies that
+// when externalDir is set but MANIFEST.json is missing, external skills
+// are skipped and no error occurs.
+func TestBuildSkills_ExternalDir_MissingManifestSkipsExternal(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+	// No MANIFEST.json in extDir.
+
+	// Create a local skill so catalog isn't empty.
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "local-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: local-skill
+description: A local skill
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill (local only), got %d", cat.TotalSkills)
+	}
+	if cat.Skills[0].Name != "local-skill" {
+		t.Errorf("expected local-skill, got %q", cat.Skills[0].Name)
+	}
+}
+
+// TestBuildSkills_ExternalDir_AIResearchSkillsLayout verifies the
+// AI-Research-SKILLs layout with numbered category dirs.
+func TestBuildSkills_ExternalDir_AIResearchSkillsLayout(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	repoDir := filepath.Join(extDir, "ai-research-skills")
+
+	// Create 01-cat/foo/SKILL.md
+	fooDir := filepath.Join(repoDir, "01-cat", "foo")
+	if err := os.MkdirAll(fooDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fooDir, "SKILL.md"), []byte(`---
+name: foo
+description: Foo skill
+tags:
+  - research
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create 01-cat/bar/SKILL.md
+	barDir := filepath.Join(repoDir, "01-cat", "bar")
+	if err := os.MkdirAll(barDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(barDir, "SKILL.md"), []byte(`---
+name: bar
+description: Bar skill
+tags:
+  - research
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create docs/skip/SKILL.md — should be skipped (no number prefix).
+	skipDir := filepath.Join(repoDir, "docs", "skip")
+	if err := os.MkdirAll(skipDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skipDir, "SKILL.md"), []byte(`---
+name: skip-me
+description: Should be skipped
+tags:
+  - docs
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ai-research-skills": {
+			URL:         "https://github.com/example/repo.git",
+			CommitSHA:   "abc123",
+			License:     "MIT",
+			Attribution: "Test",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	names := make(map[string]bool)
+	for _, s := range cat.Skills {
+		names[s.Name] = true
+	}
+	if !names["foo"] {
+		t.Error("expected 'foo' skill in catalog")
+	}
+	if !names["bar"] {
+		t.Error("expected 'bar' skill in catalog")
+	}
+	if names["skip-me"] {
+		t.Error("expected 'skip-me' to NOT be in catalog (docs dir should be skipped)")
+	}
+	if cat.TotalSkills != 2 {
+		t.Errorf("expected 2 external skills, got %d", cat.TotalSkills)
+	}
+}
+
+// TestBuildSkills_ExternalDir_UIUXProMaxSkillLayout verifies the
+// ui-ux-pro-max-skill layout with .claude/skills/*/SKILL.md.
+func TestBuildSkills_ExternalDir_UIUXProMaxSkillLayout(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	repoDir := filepath.Join(extDir, "ui-ux-pro-max-skill")
+
+	// Create .claude/skills/foo/SKILL.md
+	fooDir := filepath.Join(repoDir, ".claude", "skills", "foo")
+	if err := os.MkdirAll(fooDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fooDir, "SKILL.md"), []byte(`---
+name: foo-ux
+description: UX skill foo
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create .claude/skills/bar/SKILL.md
+	barDir := filepath.Join(repoDir, ".claude", "skills", "bar")
+	if err := os.MkdirAll(barDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(barDir, "SKILL.md"), []byte(`---
+name: bar-ux
+description: UX skill bar
+tags:
+  - design
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeManifest(t, extDir, map[string]ExternalRepoState{
+		"ui-ux-pro-max-skill": {
+			URL:         "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+			CommitSHA:   "bdf1179a8b7c6d5e",
+			License:     "MIT",
+			Attribution: "Copyright 2024 Next Level Builder. Used under MIT License.",
+		},
+	})
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	names := make(map[string]bool)
+	for _, s := range cat.Skills {
+		names[s.Name] = true
+	}
+	if !names["foo-ux"] {
+		t.Error("expected 'foo-ux' skill in catalog")
+	}
+	if !names["bar-ux"] {
+		t.Error("expected 'bar-ux' skill in catalog")
+	}
+	if cat.TotalSkills != 2 {
+		t.Errorf("expected 2 external skills, got %d", cat.TotalSkills)
+	}
+}
+
+// TestBuildSkills_ExternalDir_NonexistentDirSkipped verifies that a
+// nonexistent externalDir results in no error and no external skills.
+func TestBuildSkills_ExternalDir_NonexistentDirSkipped(t *testing.T) {
+	dir := t.TempDir()
+	extDir := filepath.Join(t.TempDir(), "nonexistent")
+
+	// Create local skill so catalog isn't empty.
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "local-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: local-skill
+description: A local skill
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill (local only), got %d", cat.TotalSkills)
+	}
+	if cat.Skills[0].Name != "local-skill" {
+		t.Errorf("expected local-skill, got %q", cat.Skills[0].Name)
+	}
+}
+
+// TestBuildSkills_ExternalDir_EmptyManifest verifies that a MANIFEST.json
+// with an empty repos map results in no external skills and no error.
+func TestBuildSkills_ExternalDir_EmptyManifest(t *testing.T) {
+	dir := t.TempDir()
+	extDir := t.TempDir()
+
+	// Write manifest with empty repos.
+	writeManifest(t, extDir, map[string]ExternalRepoState{})
+
+	// Create local skill.
+	localSkillDir := filepath.Join(dir, ".opencode", "skills", "local-skill")
+	if err := os.MkdirAll(localSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localSkillDir, "SKILL.md"), []byte(`---
+name: local-skill
+description: A local skill
+---
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := NewBuilderWithExternal(nil, nil, dir, extDir)
+	cat := builder.BuildSkills("orchestrator", dir)
+
+	if cat.TotalSkills != 1 {
+		t.Fatalf("expected 1 skill (local only), got %d", cat.TotalSkills)
+	}
+	if cat.Skills[0].Name != "local-skill" {
+		t.Errorf("expected local-skill, got %q", cat.Skills[0].Name)
 	}
 }

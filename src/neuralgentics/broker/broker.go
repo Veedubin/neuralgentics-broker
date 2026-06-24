@@ -33,6 +33,7 @@ type Broker struct {
 	httpClients   map[string]proxy.Client // HTTP/SSE clients keyed by server name
 	httpMu        sync.RWMutex            // protects httpClients
 	WorkspaceRoot string                  // absolute path to project root for skill catalog reads
+	ExternalDir   string                  // path to ~/.neuralgentics/external_skills/ (or empty if disabled)
 }
 
 // ToolExposer is an interface for checking and recording tool exposure
@@ -74,7 +75,34 @@ func NewBrokerWithWorkspace(workspaceRoot string) *Broker {
 		builder:       catalog.NewBuilderWithAccess(reg, ac),
 		httpClients:   make(map[string]proxy.Client),
 		WorkspaceRoot: workspaceRoot,
+		ExternalDir:   "",
 	}
+}
+
+// NewBrokerWithExternal creates a Broker with external skill support.
+// workspaceRoot is the project root for local skill reads.
+// externalDir is the path to ~/.neuralgentics/external_skills/ (or empty to disable).
+// The builder is initialized with external skill walking enabled.
+func NewBrokerWithExternal(workspaceRoot, externalDir string) *Broker {
+	reg := registry.NewRegistry()
+	ac := access.NewAccessControl(access.DefaultServerRoles)
+	return &Broker{
+		registry:      reg,
+		launcher:      launcher.NewLauncher(reg),
+		proxy:         proxy.NewMCPProxy(),
+		access:        ac,
+		builder:       catalog.NewBuilderWithExternal(reg, ac, workspaceRoot, externalDir),
+		httpClients:   make(map[string]proxy.Client),
+		WorkspaceRoot: workspaceRoot,
+		ExternalDir:   externalDir,
+	}
+}
+
+// SetExternalSkillsDir sets or updates the external skills directory on the broker
+// and its builder, reloading the manifest from the new path.
+func (b *Broker) SetExternalSkillsDir(externalDir string) {
+	b.ExternalDir = externalDir
+	b.builder.SetExternalDir(externalDir)
 }
 
 // SetToolExposer sets the tool exposer for lazy tool exposure tracking.
