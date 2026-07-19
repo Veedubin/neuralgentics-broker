@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,13 +29,53 @@ type HTTPClient struct {
 	mu         sync.Mutex
 }
 
+// proxyTransport returns the http.RoundTripper the HTTPClient should use.
+//
+// When gatewayURL is empty (EGRESS_GATEWAY_URL unset), it returns
+// http.DefaultTransport — preserving the pre-v0.13.0 behavior of the
+// broker making direct HTTP calls to MCP servers.
+//
+// When gatewayURL is set to a valid URL (e.g. "http://localhost:9090"),
+// it returns an http.Transport that routes outbound requests through
+// that egress gateway via http.ProxyURL. Timeouts mirror the default
+// transport's values so gateway-mode behavior is consistent with direct
+// mode. An invalid gatewayURL falls back to http.DefaultTransport so a
+// misconfiguration never hard-breaks broker calls.
+func proxyTransport(gatewayURL string) http.RoundTripper {
+	if gatewayURL == "" {
+		return http.DefaultTransport
+	}
+	parsed, err := url.Parse(gatewayURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return http.DefaultTransport
+	}
+	return &http.Transport{
+		Proxy: http.ProxyURL(parsed),
+		// Timeouts mirror http.DefaultTransport / DefaultTransport cloning.
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 // NewHTTPClient creates an HTTP client for the given MCP server URL.
 // authHeader is the value of the Authorization header (e.g. "Bearer xxx"); pass "" for no auth.
+//
+// Outbound HTTP is routed through the egress gateway when the
+// EGRESS_GATEWAY_URL environment variable is set to a non-empty URL.
+// When the variable is unset, behavior is identical to pre-v0.13.0
+// (direct HTTP via http.DefaultTransport).
 func NewHTTPClient(baseURL string, authHeader string) *HTTPClient {
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		authHeader: authHeader,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: proxyTransport(os.Getenv("EGRESS_GATEWAY_URL")),
+		},
 	}
 }
 
@@ -48,7 +91,7 @@ func (h *HTTPClient) Initialize(ctx context.Context) error {
 			"capabilities":    map[string]any{},
 			"clientInfo": map[string]any{
 				"name":    "neuralgentics-broker",
-				"version": "0.5.0",
+				"version": "0.13.0",
 			},
 		},
 	}
