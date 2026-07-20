@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // DefaultThreshold is the minimum score for a match to be considered valid.

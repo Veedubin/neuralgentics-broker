@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/launcher"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/launcher"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // jsonrpcRequest represents a JSON-RPC 2.0 request.

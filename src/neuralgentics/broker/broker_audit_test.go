@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/audit"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/audit"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // TestBrokerCallEmitsAudit verifies that Broker.Call wraps tool calls

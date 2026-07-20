@@ -3,7 +3,7 @@ package registry
 import (
 	"testing"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func TestRegistry_UpdateEntry(t *testing.T) {

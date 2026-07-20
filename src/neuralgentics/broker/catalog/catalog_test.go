@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // helperRegistry creates a registry with the given configs and optional tool lists.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // mockServer simulates an MCP server by reading JSON-RPC requests from stdin

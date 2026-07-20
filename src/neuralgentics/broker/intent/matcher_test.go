@@ -3,7 +3,7 @@ package intent
 import (
 	"testing"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func sampleTools() []types.ToolSummary {

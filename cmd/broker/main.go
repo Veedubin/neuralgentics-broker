@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker"
-	"neuralgentics-broker/src/neuralgentics/broker/access"
-	"neuralgentics-broker/src/neuralgentics/broker/audit"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/access"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/audit"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func main() {

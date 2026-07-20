@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/launcher"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/launcher"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // TestReloadServer_NotRegistered verifies that ReloadServer returns an error

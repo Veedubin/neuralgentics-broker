@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func TestHealth_NotRegistered(t *testing.T) {

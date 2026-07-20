@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // TestStartServer_FilesystemMCP tests the full StartServer lifecycle with

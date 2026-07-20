@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // ServerEntry holds the runtime state of a registered MCP server.

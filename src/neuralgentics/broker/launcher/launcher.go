@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // HealthStatus represents the health state of a server process.

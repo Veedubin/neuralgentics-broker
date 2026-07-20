@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/access"
-	"neuralgentics-broker/src/neuralgentics/broker/audit"
-	"neuralgentics-broker/src/neuralgentics/broker/catalog"
-	"neuralgentics-broker/src/neuralgentics/broker/intent"
-	"neuralgentics-broker/src/neuralgentics/broker/launcher"
-	"neuralgentics-broker/src/neuralgentics/broker/profile"
-	"neuralgentics-broker/src/neuralgentics/broker/proxy"
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/access"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/audit"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/catalog"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/intent"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/launcher"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/profile"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/proxy"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // Broker is the top-level facade for the MCP broker.

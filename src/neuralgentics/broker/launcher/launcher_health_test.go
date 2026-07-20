@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // TestLauncher_HealthTransitions verifies that the Health method correctly

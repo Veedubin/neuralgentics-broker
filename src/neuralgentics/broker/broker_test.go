@@ -3,8 +3,8 @@ package broker
 import (
 	"testing"
 
-	"neuralgentics-broker/src/neuralgentics/broker/launcher"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/launcher"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func TestHealth_StoppedServer(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"neuralgentics-broker/src/neuralgentics/broker/access"
-	"neuralgentics-broker/src/neuralgentics/broker/registry"
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/access"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/registry"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // ServerSummary is a lightweight description of an MCP server for catalog display.

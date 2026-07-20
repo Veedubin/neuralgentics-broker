@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"neuralgentics-broker/src/neuralgentics/broker/types"
+	"github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 // HTTPClient is an MCP client that speaks JSON-RPC over HTTP and SSE.
