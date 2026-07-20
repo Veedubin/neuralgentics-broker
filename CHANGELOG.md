@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Standalone README + LICENSE (T-131).** `packages/broker-go/README.md`
+  now positions the broker as a standalone installable product, mirroring
+  the structure of the `neuralgentics-web` README. Documents the
+  `go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest`
+  one-liner, YAML config, CLI flags, audit (JSONL + Postgres schema),
+  egress-gateway transport swap, SIGHUP hot-reload, and Go-module
+  library import. `packages/broker-go/LICENSE` carries the MIT license
+  (matching `neuralgentics-gateway`), so the module is self-contained
+  for publication as its own repo. New `readme_test.go` guards the
+  README's existence, install command, egress-gateway mention, and
+  audit section so future edits don't silently drop them.
+
 ### Changed
 - **Module path rename (T-130).** The Go module path changed from the
   bare local path `neuralgentics-broker` to the fully-qualified public
