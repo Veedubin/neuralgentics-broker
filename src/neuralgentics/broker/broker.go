@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"neuralgentics-broker/src/neuralgentics/broker/access"
+	"neuralgentics-broker/src/neuralgentics/broker/audit"
 	"neuralgentics-broker/src/neuralgentics/broker/catalog"
 	"neuralgentics-broker/src/neuralgentics/broker/intent"
 	"neuralgentics-broker/src/neuralgentics/broker/launcher"
@@ -34,6 +35,7 @@ type Broker struct {
 	httpMu        sync.RWMutex            // protects httpClients
 	WorkspaceRoot string                  // absolute path to project root for skill catalog reads
 	ExternalDir   string                  // path to ~/.neuralgentics/external_skills/ (or empty if disabled)
+	auditWriter   *audit.AuditWriter      // tool-call audit sink; nil = no auditing
 }
 
 // ToolExposer is an interface for checking and recording tool exposure
@@ -109,6 +111,13 @@ func (b *Broker) SetExternalSkillsDir(externalDir string) {
 // The MemorySystem implements the ToolExposer interface.
 func (b *Broker) SetToolExposer(exposer ToolExposer) {
 	b.toolExposer = exposer
+}
+
+// SetAuditWriter installs the tool-call audit writer. Pass nil to
+// disable auditing. The caller is responsible for Close()'ing the
+// writer at process exit (typically via defer in main()).
+func (b *Broker) SetAuditWriter(w *audit.AuditWriter) {
+	b.auditWriter = w
 }
 
 // RegisterServer adds a server configuration to the registry.
@@ -435,49 +444,68 @@ func (b *Broker) HealthDeep() map[string]string {
 // it returns access.ErrUnauthorized with available server hints.
 // For HTTP/SSE servers, it uses the stored HTTPClient; for stdio servers,
 // it uses the shared MCPProxy.
+//
+// When an audit writer is installed (T-113), each call is wrapped with
+// timing + status capture and the resulting AuditRecord is enqueued
+// for asynchronous flush to JSONL and/or PG. Audit failures are
+// non-fatal — they are logged via the broker but do not propagate to
+// the caller (a broken audit sink must not break tool dispatch).
 func (b *Broker) Call(role string, serverName string, toolName string, args map[string]any) (map[string]any, error) {
 	// Check access control.
 	if !b.access.CanAccess(role, serverName) {
 		accessible := b.access.GetAccessibleServers(role)
-		return nil, access.ErrUnauthorized{
+		err := access.ErrUnauthorized{
 			Role:             role,
 			Server:           serverName,
 			Reason:           fmt.Sprintf("role %s cannot access server %s", role, serverName),
 			AvailableServers: accessible,
 		}
+		// Audit the denied call (it never reached the server).
+		if b.auditWriter != nil {
+			b.auditWriter.Write(audit.BuildRecord(role, serverName, toolName, args, nil, err, time.Now()))
+		}
+		return nil, err
 	}
+
+	start := time.Now()
 
 	// Check for an HTTP client first (HTTP/SSE transport).
 	b.httpMu.RLock()
 	client, isHTTP := b.httpClients[serverName]
 	b.httpMu.RUnlock()
 
+	var result map[string]any
+	var callErr error
+
 	if isHTTP {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return client.Call(ctx, toolName, args)
+		result, callErr = client.Call(ctx, toolName, args)
+	} else {
+		// Stdio transport: use the shared proxy.
+		entry, ok := b.registry.Get(serverName)
+		if !ok {
+			callErr = fmt.Errorf("server %q not found", serverName)
+		} else if entry.Stdin == nil || entry.Stdout == nil {
+			callErr = fmt.Errorf("server %q is not running (no pipes)", serverName)
+		} else {
+			params := map[string]any{
+				"name":      toolName,
+				"arguments": args,
+			}
+			result, callErr = b.proxy.Call(serverName, "tools/call", params, entry.Stdin, entry.Stdout)
+			if callErr != nil {
+				callErr = fmt.Errorf("call %q on %q: %w", toolName, serverName, callErr)
+			}
+		}
 	}
 
-	// Stdio transport: use the shared proxy.
-	entry, ok := b.registry.Get(serverName)
-	if !ok {
-		return nil, fmt.Errorf("server %q not found", serverName)
-	}
-	if entry.Stdin == nil || entry.Stdout == nil {
-		return nil, fmt.Errorf("server %q is not running (no pipes)", serverName)
+	// Audit the call (success or failure). Non-fatal on writer errors.
+	if b.auditWriter != nil {
+		b.auditWriter.Write(audit.BuildRecord(role, serverName, toolName, args, result, callErr, start))
 	}
 
-	params := map[string]any{
-		"name":      toolName,
-		"arguments": args,
-	}
-
-	result, err := b.proxy.Call(serverName, "tools/call", params, entry.Stdin, entry.Stdout)
-	if err != nil {
-		return nil, fmt.Errorf("call %q on %q: %w", toolName, serverName, err)
-	}
-
-	return result, nil
+	return result, callErr
 }
 
 // MatchIntent finds the best matching tool for a natural language intent.

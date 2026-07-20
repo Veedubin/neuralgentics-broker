@@ -1,16 +1,60 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
+	"time"
 
 	"neuralgentics-broker/src/neuralgentics/broker"
 	"neuralgentics-broker/src/neuralgentics/broker/access"
+	"neuralgentics-broker/src/neuralgentics/broker/audit"
 	"neuralgentics-broker/src/neuralgentics/broker/types"
 )
 
 func main() {
+	// === Audit CLI flags (T-113) ===
+	auditSink := flag.String("audit", "jsonl", "audit sinks: off|jsonl|jsonl+pg")
+	auditJSONLPath := flag.String("audit-jsonl-path", "", "path to JSONL audit log (default ~/.neuralgentics/broker_audit.jsonl)")
+	auditPGURL := flag.String("audit-pg-url", "", "PostgreSQL DSN for jsonl+pg mode (empty = JSONL only even if --audit=jsonl+pg)")
+	auditFlush := flag.Duration("audit-flush-interval", time.Second, "JSONL/PG buffer flush interval")
+	auditArgsTrunc := flag.Int("audit-args-truncate", 4096, "cap args_hash length (0 = no truncate)")
+	auditResultTrunc := flag.Int("audit-result-truncate", 8192, "cap result_size reporting (0 = no truncate)")
+	flag.Parse()
+
+	cfg := audit.DefaultConfig()
+	if sink, err := audit.ParseSink(*auditSink); err != nil {
+		log.Fatalf("invalid --audit flag: %v", err)
+	} else {
+		cfg.Sink = sink
+	}
+	if *auditJSONLPath != "" {
+		cfg.JSONLPath = *auditJSONLPath
+	}
+	if *auditPGURL != "" {
+		cfg.PGURL = *auditPGURL
+	}
+	cfg.FlushInterval = *auditFlush
+	cfg.ArgsTruncate = *auditArgsTrunc
+	cfg.ResultTruncate = *auditResultTrunc
+
+	// If user picked jsonl+pg but didn't supply a PG URL, downgrade to
+	// JSONL-only with a warning rather than crashing.
+	if cfg.Sink == audit.SinkJSONLAndPG && cfg.PGURL == "" {
+		fmt.Fprintln(os.Stderr, "warning: --audit=jsonl+pg without --audit-pg-url; falling back to jsonl-only")
+		cfg.Sink = audit.SinkJSONL
+	}
+
+	auditWriter, err := audit.NewAuditWriter(cfg)
+	if err != nil {
+		log.Fatalf("init audit writer: %v", err)
+	}
+	defer func() { _ = auditWriter.Close() }()
+	fmt.Fprintf(os.Stderr, "audit: %s\n", cfg)
+
 	b := broker.NewBrokerWithWorkspace(".")
+	b.SetAuditWriter(auditWriter)
 
 	// Register example test servers with descriptions and capabilities.
 	testServers := []types.ServerConfig{
@@ -41,11 +85,11 @@ func main() {
 		},
 	}
 
-	for _, cfg := range testServers {
-		if err := b.RegisterServer(cfg); err != nil {
-			log.Fatalf("Failed to register server %q: %v", cfg.Name, err)
+	for _, srvCfg := range testServers {
+		if err := b.RegisterServer(srvCfg); err != nil {
+			log.Fatalf("Failed to register server %q: %v", srvCfg.Name, err)
 		}
-		fmt.Printf("Registered server: %s\n", cfg.Name)
+		fmt.Printf("Registered server: %s\n", srvCfg.Name)
 	}
 
 	// Populate tools for demonstration (normally acquired via Initialize + ListTools).
