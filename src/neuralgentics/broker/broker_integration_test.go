@@ -134,6 +134,10 @@ func TestDeregisterServer_StopsProcess(t *testing.T) {
 	}
 
 	b := broker.NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so StartServer's
+	// handshake fails in ~500ms instead of blocking 30s and racing the
+	// test binary's -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	// Register a simple server (sleep acts as a long-running process).
 	config := types.ServerConfig{

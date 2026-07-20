@@ -120,6 +120,16 @@ func (b *Broker) SetAuditWriter(w *audit.AuditWriter) {
 	b.auditWriter = w
 }
 
+// SetRPCTimeout configures how long the shared stdio proxy waits for a
+// JSON-RPC response before timing out. The 30s default is appropriate for
+// production. Tests that drive non-MCP subprocesses (e.g. "sleep 999") should
+// call this with a short duration (a few hundred ms) right after NewBroker so
+// the MCP handshake fails fast instead of blocking for 30s and racing the
+// test binary's own -timeout.
+func (b *Broker) SetRPCTimeout(d time.Duration) {
+	b.proxy.SetRPCTimeout(d)
+}
+
 // RegisterServer adds a server configuration to the registry.
 func (b *Broker) RegisterServer(config types.ServerConfig) error {
 	if config.Name == "" {

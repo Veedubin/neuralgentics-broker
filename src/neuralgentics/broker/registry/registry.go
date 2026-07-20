@@ -102,17 +102,25 @@ func (r *Registry) Get(name string) (*ServerEntry, bool) {
 }
 
 // List returns the status of all registered servers.
+//
+// The registry's RWMutex protects the map slots; the per-entry mutex
+// protects the runtime fields (Process/Stdin/Stdout/Tools). We hold the
+// RLock for the map lookup and then take a point-in-time Snapshot of each
+// entry under its own lock so the launcher's background watcher (which
+// nils out Process/Stdin/Stdout from a separate goroutine) cannot race
+// with our reads. Without the Snapshot, the race detector flags a
+// concurrent read of entry.Process vs clearAfterExit's write.
 func (r *Registry) List() []types.ServerStatus {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	statuses := make([]types.ServerStatus, 0, len(r.servers))
 	for name, entry := range r.servers {
-		running := entry.Process != nil
+		snap := entry.Snapshot()
 		statuses = append(statuses, types.ServerStatus{
 			Name:    name,
-			Running: running,
-			Tools:   entry.Tools,
+			Running: snap.Process != nil,
+			Tools:   snap.Tools,
 		})
 	}
 	return statuses
@@ -121,23 +129,33 @@ func (r *Registry) List() []types.ServerStatus {
 // GetTools returns cached tool summaries for a specific server.
 func (r *Registry) GetTools(serverName string) []types.ToolSummary {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	entry, ok := r.servers[serverName]
+	r.mu.RUnlock()
 	if !ok {
 		return nil
 	}
-	return entry.Tools
+	// Read Tools under the entry's own lock so concurrent writers
+	// (launcher.clearAfterExit, Broker.SetTools) cannot race with us.
+	snap := entry.Snapshot()
+	return snap.Tools
 }
 
 // GetAllTools returns cached tool summaries from all servers.
 func (r *Registry) GetAllTools() []types.ToolSummary {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var all []types.ToolSummary
+	entries := make([]*ServerEntry, 0, len(r.servers))
 	for _, entry := range r.servers {
-		all = append(all, entry.Tools...)
+		entries = append(entries, entry)
+	}
+	r.mu.RUnlock()
+
+	// Snapshot each entry outside the registry lock so a slow entry mutex
+	// does not block map mutations. The Tools slice is read under the
+	// entry lock to avoid racing with launcher.clearAfterExit.
+	var all []types.ToolSummary
+	for _, entry := range entries {
+		snap := entry.Snapshot()
+		all = append(all, snap.Tools...)
 	}
 	return all
 }

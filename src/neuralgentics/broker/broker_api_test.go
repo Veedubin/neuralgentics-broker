@@ -619,6 +619,11 @@ func TestBroker_Call_HasTimeout(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// Drop the proxy's 30s RPC timeout to a few hundred ms so the MCP
+	// handshake against "sleep 999" fails fast. Without this, sendRPC
+	// blocks for the full 30s and races the test binary's -timeout,
+	// making the test appear to hang. See T-117.3.
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	// Register a server that will not respond (sleep + bogus command).
 	// The launcher will start the process, but the MCP handshake will

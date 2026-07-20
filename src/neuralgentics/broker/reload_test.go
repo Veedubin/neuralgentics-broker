@@ -30,6 +30,9 @@ func TestReloadServer_StoppedServer(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	config := types.ServerConfig{
 		Name:    "sleep-server",
@@ -83,6 +86,9 @@ func TestReloadServer_RunningServer(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	config := types.ServerConfig{
 		Name:    "sleep-server",
@@ -165,6 +171,9 @@ func TestReloadServer_AfterCrash(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	config := types.ServerConfig{
 		Name:    "sleep-server",
@@ -203,13 +212,23 @@ func TestReloadServer_AfterCrash(t *testing.T) {
 	// The background goroutine from launcher.Start should have called
 	// clearAfterExit, which sets Process=nil. Reset Stdin/Stdout as well
 	// to simulate a clean crashed state.
+	//
+	// Use Snapshot() for the read so we do not race with the launcher's
+	// background watcher goroutine (clearAfterExit), which nils out the
+	// same fields under entry.mu. The race detector previously flagged
+	// the bare `entry.Process != nil` read here. (T-117.3)
 	entry, _ = b.registry.Get("sleep-server")
-	if entry.Process != nil {
+	snap := entry.Snapshot()
+	if snap.Process != nil {
 		// The background goroutine may not have cleaned up yet.
 		// Manually simulate the crashed state so our test is deterministic.
+		// Take the entry lock around the write so we do not race with
+		// clearAfterExit's concurrent nil-out of the same fields.
+		entry.Lock()
 		entry.Process = nil
 		entry.Stdin = nil
 		entry.Stdout = nil
+		entry.Unlock()
 		b.registry.UpdateEntry("sleep-server", entry)
 	}
 
@@ -250,6 +269,9 @@ func TestReloadServerWithConfig_UpdatesEnvVars(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	originalConfig := types.ServerConfig{
 		Name:    "env-test-server",
@@ -315,6 +337,9 @@ func TestReloadServerWithConfig_UpdatesArgs(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	originalConfig := types.ServerConfig{
 		Name:    "args-test-server",
@@ -371,6 +396,9 @@ func TestReloadServerWithConfig_IdempotentStart(t *testing.T) {
 	}
 
 	b := NewBroker()
+	// "sleep" never speaks MCP — drop the proxy timeout so the handshake
+	// fails in ~500ms instead of blocking 30s and racing -timeout. (T-117.3)
+	b.SetRPCTimeout(500 * time.Millisecond)
 
 	originalConfig := types.ServerConfig{
 		Name:    "idle-server",

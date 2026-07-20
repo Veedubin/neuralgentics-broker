@@ -54,6 +54,13 @@ type NotificationHandler func(method string, params json.RawMessage)
 
 // MCPProxy manages JSON-RPC communication with MCP servers over stdio.
 // It supports an async reader goroutine that routes responses and notifications.
+//
+// The rpcTimeout field bounds how long sendRPC waits for a JSON-RPC response
+// before giving up. It defaults to 30s (production-safe). Tests that exercise
+// non-MCP subprocesses (e.g. "sleep") should lower it via SetRPCTimeout so
+// the handshake fails fast instead of blocking for the full 30s — otherwise
+// the test binary's -timeout races with the proxy timeout and the test
+// appears to hang.
 type MCPProxy struct {
 	mu         sync.Mutex
 	nextID     int64
@@ -64,6 +71,7 @@ type MCPProxy struct {
 	readerDone chan struct{}
 	running    bool
 	onNotify   NotificationHandler
+	rpcTimeout time.Duration // how long sendRPC waits for a response; 0 = default 30s
 }
 
 // NewMCPProxy creates a new MCP proxy for JSON-RPC communication.
@@ -72,7 +80,19 @@ func NewMCPProxy() *MCPProxy {
 		nextID:     1,
 		pending:    make(map[int64]chan *jsonrpcResponse),
 		readerDone: make(chan struct{}),
+		rpcTimeout: 30 * time.Second,
 	}
+}
+
+// SetRPCTimeout configures how long sendRPC waits for a JSON-RPC response
+// before timing out. Production callers should leave the 30s default; tests
+// that drive non-MCP subprocesses (e.g. "sleep 999") should set this to a few
+// hundred milliseconds so the handshake fails fast and does not stall the
+// test binary's own -timeout.
+func (p *MCPProxy) SetRPCTimeout(d time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rpcTimeout = d
 }
 
 // StartReader launches a background goroutine that continuously reads lines
@@ -338,6 +358,13 @@ func (p *MCPProxy) sendRPC(stdin io.Writer, method string, params map[string]any
 	}
 
 	// Wait on the pending channel for the reader goroutine to route the response.
+	// Snapshot the timeout under the lock so SetRPCTimeout is race-free.
+	p.mu.Lock()
+	timeout := p.rpcTimeout
+	p.mu.Unlock()
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	select {
 	case resp, ok := <-ch:
 		p.mu.Lock()
@@ -347,7 +374,7 @@ func (p *MCPProxy) sendRPC(stdin io.Writer, method string, params map[string]any
 			return nil, fmt.Errorf("proxy stopped while waiting for response to %q", method)
 		}
 		return resp, nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(timeout):
 		p.mu.Lock()
 		delete(p.pending, id)
 		p.mu.Unlock()
