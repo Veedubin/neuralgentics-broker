@@ -11,12 +11,45 @@ import (
 )
 
 // ServerEntry holds the runtime state of a registered MCP server.
+//
+// The runtime fields (Process, Stdin, Stdout, Tools) are mutated by the
+// launcher from multiple goroutines (the Start background watcher, Health,
+// Stop, clearAfterExit). The entry's own mutex serializes those mutations;
+// callers MUST hold Lock/Unlock around read-modify-write sequences, or use
+// Snapshot for a consistent point-in-time read. The registry's RWMutex
+// only protects the map slots, NOT the contents of *ServerEntry.
 type ServerEntry struct {
+	mu      sync.Mutex
 	Config  types.ServerConfig
 	Process *os.Process
 	Tools   []types.ToolSummary
 	Stdin   io.WriteCloser
 	Stdout  io.ReadCloser
+}
+
+// Lock acquires the entry's mutex. Callers performing a read-modify-write
+// sequence (e.g. the launcher mutating Process/Stdin/Stdout) MUST hold the
+// lock across the whole sequence and call Unlock when done.
+func (e *ServerEntry) Lock() { e.mu.Lock() }
+
+// Unlock releases the entry's mutex.
+func (e *ServerEntry) Unlock() { e.mu.Unlock() }
+
+// Snapshot returns a consistent point-in-time copy of the entry's runtime
+// fields. It is the safe way for concurrent observers (Health checks, tests,
+// status reporters) to read Process/Stdin/Stdout/Tools without racing with
+// the launcher's background watcher. The returned copy has a zero-valued
+// mutex that is not used; callers should treat the snapshot as read-only.
+func (e *ServerEntry) Snapshot() ServerEntry {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return ServerEntry{
+		Config:  e.Config,
+		Process: e.Process,
+		Tools:   e.Tools,
+		Stdin:   e.Stdin,
+		Stdout:  e.Stdout,
+	}
 }
 
 // Registry is an in-memory, thread-safe registry mapping server names

@@ -55,8 +55,11 @@ func TestHealth_Initializing(t *testing.T) {
 	}
 
 	entry, _ := reg.Get("test-server")
+	// Lock around the mutation so a concurrent Health caller cannot
+	// observe a torn tuple.
+	entry.Lock()
 	entry.Process, _ = os.FindProcess(os.Getpid())
-	reg.UpdateEntry("test-server", entry)
+	entry.Unlock()
 
 	status := l.Health("test-server")
 	if status != HealthInitializing {

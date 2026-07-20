@@ -105,11 +105,19 @@ func (p *MCPProxy) readLoop(stdout io.Reader) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		// Check if we should stop (non-blocking).
-		select {
-		case <-p.readerCh:
-			return
-		default:
+		// Check if we should stop (non-blocking). Read readerCh under
+		// the lock so Stop's close+nil pair (lines 175-176) cannot race
+		// with this select — without the lock, the race detector flags
+		// a concurrent read of p.readerCh vs Stop's close(p.readerCh).
+		p.mu.Lock()
+		ch := p.readerCh
+		p.mu.Unlock()
+		if ch != nil {
+			select {
+			case <-ch:
+				return
+			default:
+			}
 		}
 
 		line := scanner.Bytes()

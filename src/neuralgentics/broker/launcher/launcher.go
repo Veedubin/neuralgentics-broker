@@ -58,11 +58,14 @@ func (l *Launcher) Start(config types.ServerConfig) error {
 		return fmt.Errorf("start server %q: %w", config.Name, err)
 	}
 
+	// Atomically publish the process handle and pipes. The background
+	// watcher goroutine and concurrent Health/Stop callers must observe a
+	// consistent tuple — lock the entry's mutex around the write.
+	entry.Lock()
 	entry.Process = cmd.Process
 	entry.Stdin = stdinPipe
 	entry.Stdout = stdoutPipe
-
-	l.registry.UpdateEntry(config.Name, entry)
+	entry.Unlock()
 
 	// Monitor the process for unexpected exits.
 	go func() {
@@ -83,21 +86,24 @@ func (l *Launcher) Stop(name string) error {
 		return fmt.Errorf("server %q not found", name)
 	}
 
-	if entry.Process == nil {
+	// Snapshot the process handle under the lock so we don't race with
+	// clearAfterExit nil'ing entry.Process.
+	entry.Lock()
+	proc := entry.Process
+	entry.Unlock()
+
+	if proc == nil {
 		return nil
 	}
 
-	if err := entry.Process.Signal(os.Interrupt); err != nil {
+	if err := proc.Signal(os.Interrupt); err != nil {
 		// Fall back to Kill if interrupt fails.
-		_ = entry.Process.Kill()
+		_ = proc.Kill()
 	}
 
-	// Give the process time to shut down gracefully.
-	// Capture the process handle by value — entry.Process is a shared
-	// pointer that clearAfterExit sets to nil. If the goroutine below
-	// reads entry.Process after clearAfterExit runs, it dereferences nil.
+	// Give the process time to shut down gracefully. Wait outside the
+	// entry lock so Health/clearAfterExit are not blocked for 5s.
 	done := make(chan error, 1)
-	proc := entry.Process
 	go func() {
 		_, waitErr := proc.Wait()
 		done <- waitErr
@@ -108,7 +114,7 @@ func (l *Launcher) Stop(name string) error {
 		// Process exited.
 	case <-time.After(5 * time.Second):
 		// Force kill.
-		_ = entry.Process.Kill()
+		_ = proc.Kill()
 	}
 
 	l.clearAfterExit(name)
@@ -128,7 +134,12 @@ func (l *Launcher) Health(name string) HealthStatus {
 		return HealthStopped
 	}
 
-	if entry.Process == nil {
+	// Take a consistent snapshot of the runtime fields under the entry
+	// mutex so the background watcher's clearAfterExit cannot tear the
+	// tuple apart while we read it.
+	snap := entry.Snapshot()
+
+	if snap.Process == nil {
 		return HealthStopped
 	}
 
@@ -136,12 +147,12 @@ func (l *Launcher) Health(name string) HealthStatus {
 	// syscall.Signal(0) is the POSIX signal-zero check: it verifies the
 	// OS process exists without actually sending a signal. Using
 	// os.Signal(nil) is incorrect as it produces "os: unsupported signal type".
-	if entry.Process.Signal(syscall.Signal(0)) != nil {
+	if snap.Process.Signal(syscall.Signal(0)) != nil {
 		return HealthDead
 	}
 
 	// Check that both stdin and stdout pipes are present for stdio servers.
-	if entry.Stdin == nil || entry.Stdout == nil {
+	if snap.Stdin == nil || snap.Stdout == nil {
 		return HealthInitializing
 	}
 
@@ -154,11 +165,14 @@ func (l *Launcher) clearAfterExit(name string) {
 	if !ok {
 		return
 	}
+	// Atomically nil out the runtime fields under the entry mutex so
+	// concurrent Health/Stop callers see a consistent cleared state.
+	entry.Lock()
 	entry.Process = nil
 	entry.Stdin = nil
 	entry.Stdout = nil
 	// Tools are preserved for status reporting after exit.
-	l.registry.UpdateEntry(name, entry)
+	entry.Unlock()
 }
 
 // BuildCommandForTransport constructs an exec.Cmd for a single transport option.
