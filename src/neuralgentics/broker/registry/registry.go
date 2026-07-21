@@ -37,8 +37,11 @@ func (e *ServerEntry) Unlock() { e.mu.Unlock() }
 
 // Snapshot returns a consistent point-in-time copy of the entry's runtime
 // fields. It is the safe way for concurrent observers (Health checks, tests,
-// status reporters) to read Process/Stdin/Stdout/Tools without racing with
-// the launcher's background watcher. The returned copy has a zero-valued
+// status reporters, Broker.Call, Broker.StartServer, ...) to read
+// Process/Stdin/Stdout/Tools/Config without racing with the launcher's
+// background watcher (which nils out Process/Stdin/Stdout from a separate
+// goroutine) or with config-mutation paths (ReloadServerWithConfig,
+// ActivateMCPServerWithTransport). The returned copy has a zero-valued
 // mutex that is not used; callers should treat the snapshot as read-only.
 func (e *ServerEntry) Snapshot() ServerEntry {
 	e.mu.Lock()
@@ -50,6 +53,56 @@ func (e *ServerEntry) Snapshot() ServerEntry {
 		Stdin:   e.Stdin,
 		Stdout:  e.Stdout,
 	}
+}
+
+// SetRuntime atomically updates the process handle, stdio pipes, and tool
+// list under the entry's mutex. Callers that need to publish a consistent
+// tuple (e.g. Launcher.Start publishing Process+Stdin+Stdout, or
+// Broker.StartServer publishing Tools after the handshake) MUST use this
+// helper rather than assigning the fields individually — assigning fields
+// one at a time without the lock lets a concurrent Snapshot() observe a
+// half-published state and races with clearAfterExit's nil-out.
+func (e *ServerEntry) SetRuntime(proc *os.Process, stdin io.WriteCloser, stdout io.ReadCloser, tools []types.ToolSummary) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Process = proc
+	e.Stdin = stdin
+	e.Stdout = stdout
+	e.Tools = tools
+}
+
+// SetTools atomically replaces the cached tool summaries under the entry
+// mutex. Use this instead of a direct `entry.Tools = ...` assignment so a
+// concurrent Snapshot()/GetTools() cannot observe a half-written slice
+// header (which the race detector flags as a concurrent read vs write).
+func (e *ServerEntry) SetTools(tools []types.ToolSummary) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Tools = tools
+}
+
+// SetConfig atomically replaces the server config under the entry mutex.
+// Use this from config-mutation paths (ReloadServerWithConfig,
+// ActivateMCPServerWithTransport) so a concurrent reader (StartServer,
+// ExportProfile) cannot race with the swap.
+func (e *ServerEntry) SetConfig(c types.ServerConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Config = c
+}
+
+// ClearRuntime atomically nils out the process handle and stdio pipes
+// under the entry mutex, preserving the cached tool list. The launcher's
+// background watcher goroutine calls this after the subprocess exits so
+// that concurrent Health/Stop/Call observers see a consistent cleared
+// state instead of a half-published mix of nil and non-nil fields.
+func (e *ServerEntry) ClearRuntime() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Process = nil
+	e.Stdin = nil
+	e.Stdout = nil
+	// Tools are preserved for status reporting after exit.
 }
 
 // Registry is an in-memory, thread-safe registry mapping server names

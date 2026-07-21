@@ -222,14 +222,9 @@ func TestReloadServer_AfterCrash(t *testing.T) {
 	if snap.Process != nil {
 		// The background goroutine may not have cleaned up yet.
 		// Manually simulate the crashed state so our test is deterministic.
-		// Take the entry lock around the write so we do not race with
-		// clearAfterExit's concurrent nil-out of the same fields.
-		entry.Lock()
-		entry.Process = nil
-		entry.Stdin = nil
-		entry.Stdout = nil
-		entry.Unlock()
-		b.registry.UpdateEntry("sleep-server", entry)
+		// ClearRuntime takes the entry lock internally so we do not race
+		// with clearAfterExit's concurrent nil-out of the same fields.
+		entry.ClearRuntime()
 	}
 
 	// Now reload. Since the process is nil (crashed), the idempotent path

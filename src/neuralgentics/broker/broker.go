@@ -155,41 +155,49 @@ func (b *Broker) StartServer(name string) error {
 		return fmt.Errorf("server %q not registered", name)
 	}
 
-	// Step 1: Launch the server subprocess.
-	if err := b.launcher.Start(entry.Config); err != nil {
+	// Step 1: Launch the server subprocess. Snapshot the config under
+	// the entry lock so we don't race with a concurrent
+	// ReloadServerWithConfig / ActivateMCPServerWithTransport swap of
+	// entry.Config.
+	config := entry.Snapshot().Config
+	if err := b.launcher.Start(config); err != nil {
 		return fmt.Errorf("start server %q: %w", name, err)
 	}
 
-	// Refresh entry to get Stdin/Stdout pipes set by launcher.
+	// Refresh entry to get Stdin/Stdout pipes set by launcher. Take a
+	// Snapshot so the pipe read doesn't race with the launcher's
+	// background watcher goroutine (which nils the pipes out via
+	// ClearRuntime after the process exits).
 	entry, ok = b.registry.Get(name)
 	if !ok {
 		return fmt.Errorf("server %q disappeared after start", name)
 	}
-	if entry.Stdin == nil || entry.Stdout == nil {
+	snap := entry.Snapshot()
+	if snap.Stdin == nil || snap.Stdout == nil {
 		return fmt.Errorf("server %q has no stdio pipes after start", name)
 	}
 
 	// Step 2: Start async reader on stdout.
-	b.proxy.StartReader(entry.Stdout)
+	b.proxy.StartReader(snap.Stdout)
 
 	// Step 3: MCP initialize handshake.
-	if err := b.proxy.Initialize(name, entry.Stdin, entry.Stdout); err != nil {
+	if err := b.proxy.Initialize(name, snap.Stdin, snap.Stdout); err != nil {
 		b.proxy.Stop()
 		_ = b.launcher.Stop(name)
 		return fmt.Errorf("initialize server %q: %w", name, err)
 	}
 
 	// Step 4: Discover tools.
-	tools, err := b.proxy.ListTools(name, entry.Stdin, entry.Stdout)
+	tools, err := b.proxy.ListTools(name, snap.Stdin, snap.Stdout)
 	if err != nil {
 		b.proxy.Stop()
 		_ = b.launcher.Stop(name)
 		return fmt.Errorf("list tools from %q: %w", name, err)
 	}
 
-	// Step 5: Store tools in registry entry.
-	entry.Tools = tools
-	b.registry.UpdateEntry(name, entry)
+	// Step 5: Store tools in registry entry under the entry lock so a
+	// concurrent GetTools/Snapshot cannot observe a half-written slice.
+	entry.SetTools(tools)
 
 	return nil
 }
@@ -204,8 +212,10 @@ func (b *Broker) ReloadServer(name string) error {
 		return fmt.Errorf("server %q not registered", name)
 	}
 
-	// Idempotent: if not running, just start it.
-	if entry.Process == nil {
+	// Idempotent: if not running, just start it. Snapshot Process under
+	// the entry lock so the read doesn't race with clearAfterExit's
+	// nil-out.
+	if entry.Snapshot().Process == nil {
 		return b.StartServer(name)
 	}
 
@@ -241,13 +251,16 @@ func (b *Broker) ReloadServerWithConfig(name string, newConfig types.ServerConfi
 	}
 
 	// Merge: replace entry.Config with the new config, preserving the name
-	// in case the caller omitted it.
+	// in case the caller omitted it. SetConfig takes the entry lock so a
+	// concurrent StartServer / ExportProfile reader cannot race with the
+	// swap.
 	newConfig.Name = name
-	entry.Config = newConfig
-	b.registry.UpdateEntry(name, entry)
+	entry.SetConfig(newConfig)
 
 	// Idempotent: if not running, just start it with the new config.
-	if entry.Process == nil {
+	// Snapshot Process under the entry lock so the read doesn't race with
+	// clearAfterExit's nil-out.
+	if entry.Snapshot().Process == nil {
 		return b.StartServer(name)
 	}
 
@@ -339,9 +352,13 @@ func (b *Broker) ActivateMCPServerWithTransport(name string, config types.MCPSer
 			}
 
 			// Update registry entry with the chosen config and tools.
-			entry.Config = sc
-			entry.Tools = tools
-			b.registry.UpdateEntry(name, entry)
+			// SetConfig + SetRuntime take the entry lock so a
+			// concurrent StartServer / Call / ExportProfile reader
+			// cannot race with the swap. We publish Process+Stdin+
+			// Stdout as nil (HTTP transport has no subprocess) and
+			// the discovered tools atomically.
+			entry.SetConfig(sc)
+			entry.SetRuntime(nil, nil, nil, tools)
 
 			// Store the HTTP client for future Call() operations.
 			b.httpMu.Lock()
@@ -353,9 +370,10 @@ func (b *Broker) ActivateMCPServerWithTransport(name string, config types.MCPSer
 
 		// Stdio transport: use the existing subprocess-based activation.
 		// Replace entry.Config with the chosen transport's legacy form.
-		oldConfig := entry.Config
-		entry.Config = sc
-		b.registry.UpdateEntry(name, entry)
+		// Snapshot the old config under the lock so the rollback path
+		// restores exactly what was there before this attempt.
+		oldConfig := entry.Snapshot().Config
+		entry.SetConfig(sc)
 
 		// Try to start.
 		err := b.StartServer(name)
@@ -363,9 +381,9 @@ func (b *Broker) ActivateMCPServerWithTransport(name string, config types.MCPSer
 			return string(transport.Type), nil
 		}
 
-		// Roll back config on failure so the next iteration starts from a known state.
-		entry.Config = oldConfig
-		b.registry.UpdateEntry(name, entry)
+		// Roll back config on failure so the next iteration starts from
+		// a known state. SetConfig takes the lock.
+		entry.SetConfig(oldConfig)
 	}
 
 	return "", fmt.Errorf("all %d transports failed for server %q", n, name)
@@ -412,13 +430,21 @@ func (b *Broker) HealthDeep() map[string]string {
 		}
 
 		entry, ok := b.registry.Get(s.Name)
-		if !ok || entry.Process == nil {
+		if !ok {
+			health[s.Name] = string(launcher.HealthStopped)
+			continue
+		}
+		// Snapshot the runtime fields under the entry lock so the
+		// Process/Stdin/Stdout reads don't race with the launcher's
+		// background watcher (which nils them out via ClearRuntime).
+		snap := entry.Snapshot()
+		if snap.Process == nil {
 			health[s.Name] = string(launcher.HealthStopped)
 			continue
 		}
 
 		// No pipes — cannot send a ping.
-		if entry.Stdin == nil || entry.Stdout == nil {
+		if snap.Stdin == nil || snap.Stdout == nil {
 			health[s.Name] = string(b.launcher.Health(s.Name))
 			continue
 		}
@@ -429,8 +455,9 @@ func (b *Broker) HealthDeep() map[string]string {
 			err error
 		}
 		ch := make(chan pingResult, 1)
+		stdin, stdout := snap.Stdin, snap.Stdout
 		go func() {
-			err := b.proxy.Initialize(s.Name, entry.Stdin, entry.Stdout)
+			err := b.proxy.Initialize(s.Name, stdin, stdout)
 			ch <- pingResult{err: err}
 		}()
 
@@ -492,20 +519,29 @@ func (b *Broker) Call(role string, serverName string, toolName string, args map[
 		defer cancel()
 		result, callErr = client.Call(ctx, toolName, args)
 	} else {
-		// Stdio transport: use the shared proxy.
+		// Stdio transport: use the shared proxy. Snapshot the entry's
+		// runtime fields under the entry lock so the Stdin/Stdout reads
+		// don't race with the launcher's background watcher goroutine
+		// (which nils them out via ClearRuntime after the process
+		// exits). Without the snapshot, the race detector flags a
+		// concurrent read of entry.Stdin vs ClearRuntime's write — see
+		// T-117.1 / T-117.5.
 		entry, ok := b.registry.Get(serverName)
 		if !ok {
 			callErr = fmt.Errorf("server %q not found", serverName)
-		} else if entry.Stdin == nil || entry.Stdout == nil {
-			callErr = fmt.Errorf("server %q is not running (no pipes)", serverName)
 		} else {
-			params := map[string]any{
-				"name":      toolName,
-				"arguments": args,
-			}
-			result, callErr = b.proxy.Call(serverName, "tools/call", params, entry.Stdin, entry.Stdout)
-			if callErr != nil {
-				callErr = fmt.Errorf("call %q on %q: %w", toolName, serverName, callErr)
+			snap := entry.Snapshot()
+			if snap.Stdin == nil || snap.Stdout == nil {
+				callErr = fmt.Errorf("server %q is not running (no pipes)", serverName)
+			} else {
+				params := map[string]any{
+					"name":      toolName,
+					"arguments": args,
+				}
+				result, callErr = b.proxy.Call(serverName, "tools/call", params, snap.Stdin, snap.Stdout)
+				if callErr != nil {
+					callErr = fmt.Errorf("call %q on %q: %w", toolName, serverName, callErr)
+				}
 			}
 		}
 	}
@@ -619,8 +655,9 @@ func (b *Broker) SetTools(serverName string, tools []types.ToolSummary) {
 	if !ok {
 		return
 	}
-	entry.Tools = tools
-	b.registry.UpdateEntry(serverName, entry)
+	// SetTools takes the entry lock so a concurrent GetTools/Snapshot
+	// cannot observe a half-written slice header.
+	entry.SetTools(tools)
 }
 
 // ─── Curated Catalog Methods (T-CATALOG-001) ─────────────────────────────────────
@@ -738,13 +775,17 @@ func (b *Broker) ExportProfile(w io.Writer, passphrase, brokerVersion string) er
 		if !ok {
 			continue
 		}
+		// Snapshot the entry under its lock so the Config/Tools reads
+		// don't race with a concurrent ReloadServerWithConfig /
+		// ActivateMCPServerWithTransport / SetTools / clearAfterExit.
+		snap := entry.Snapshot()
 		catalogLock = append(catalogLock, map[string]any{
 			"name":    s.Name,
 			"running": s.Running,
-			"tools":   s.Tools,
-			"type":    entry.Config.Type,
-			"package": entry.Config.Command,
-			"args":    entry.Config.Args,
+			"tools":   snap.Tools,
+			"type":    snap.Config.Type,
+			"package": snap.Config.Command,
+			"args":    snap.Config.Args,
 		})
 	}
 	catalogJSON, _ := json.Marshal(catalogLock)

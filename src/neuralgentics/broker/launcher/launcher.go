@@ -60,12 +60,12 @@ func (l *Launcher) Start(config types.ServerConfig) error {
 
 	// Atomically publish the process handle and pipes. The background
 	// watcher goroutine and concurrent Health/Stop callers must observe a
-	// consistent tuple — lock the entry's mutex around the write.
-	entry.Lock()
-	entry.Process = cmd.Process
-	entry.Stdin = stdinPipe
-	entry.Stdout = stdoutPipe
-	entry.Unlock()
+	// consistent tuple — SetRuntime takes the entry's mutex internally.
+	// Tools is not known yet (discovered later by the broker); preserve
+	// whatever was previously cached so a concurrent GetTools caller
+	// doesn't observe an empty slice mid-publish.
+	prevTools := entry.Snapshot().Tools
+	entry.SetRuntime(cmd.Process, stdinPipe, stdoutPipe, prevTools)
 
 	// Monitor the process for unexpected exits.
 	go func() {
@@ -166,13 +166,10 @@ func (l *Launcher) clearAfterExit(name string) {
 		return
 	}
 	// Atomically nil out the runtime fields under the entry mutex so
-	// concurrent Health/Stop callers see a consistent cleared state.
-	entry.Lock()
-	entry.Process = nil
-	entry.Stdin = nil
-	entry.Stdout = nil
-	// Tools are preserved for status reporting after exit.
-	entry.Unlock()
+	// concurrent Health/Stop/Call/Snapshot observers see a consistent
+	// cleared state instead of a half-published mix of nil and non-nil
+	// fields. Tools are preserved for status reporting after exit.
+	entry.ClearRuntime()
 }
 
 // BuildCommandForTransport constructs an exec.Cmd for a single transport option.
