@@ -4,6 +4,19 @@ All notable changes to the `packages/broker-go` Go module are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-21
+
+Documentation overhaul. No functional changes.
+
+### Added
+
+- mkdocs-material documentation site + gh-pages deploy workflow
+  (https://veedubin.github.io/neuralgentics-broker/): getting started,
+  configuration, architecture with full tool-call-flow mermaid diagram,
+  audit, skills, changelog.
+- README rewritten per the FML doc contract: elevator pitch, 3-layer
+  architecture, pinned `@v0.1.0` install, grouped features.
+
 ## [0.1.0] - 2026-07-21
 
 First standalone release. Extracted from the `neuralgentics` monorepo
