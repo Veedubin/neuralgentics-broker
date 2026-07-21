@@ -5,6 +5,10 @@ agent) and one or more MCP servers. It owns three responsibilities:
 spawning/supervising servers, proxying JSON-RPC, and recording every tool
 call.
 
+First-class MCP servers (memini-ai) are registered directly in
+`opencode.json` and bypass the broker entirely. Everything else sits behind
+the broker: catalog-advertised, access-controlled, brokered on demand.
+
 ## Three-layer design
 
 The broker is organized as three cooperating layers.
