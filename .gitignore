@@ -1,6 +1,15 @@
-# Compiled Go binaries (NOT the source code!)
-/cmd/broker/broker
-/cmd/broker/broker.exe
+# Binaries produced by `go build` / `go test`
+/broker
+/broker.exe
 *.exe
 *.test
 *.out
+
+# Local build artifacts
+/bin/
+/dist/
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
