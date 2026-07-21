@@ -23,11 +23,24 @@ import (
 // in proxy/http_client.go and proxy/proxy.go) — those are
 // protocol-visible display names, not Go import paths.
 func TestImportPathConsistency(t *testing.T) {
-	// Locate the module root: this test file lives at
-	// packages/broker-go/src/neuralgentics/broker/, so the module
-	// root is 4 levels up.
+	// Locate the module root by ascending from this test file until we
+	// find go.mod. A fixed number of ".." levels is NOT robust: in the
+	// neuralgentics monorepo the module lives at packages/broker-go
+	// (4 levels up from this file), but in the standalone extracted
+	// repository it lives at the repo root (3 levels up). Ascending to
+	// go.mod works in both layouts.
 	_, testFile, _, _ := runtime.Caller(0)
-	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", "..", "..", ".."))
+	moduleRoot := filepath.Dir(testFile)
+	for {
+		if _, err := os.Stat(filepath.Join(moduleRoot, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(moduleRoot)
+		if parent == moduleRoot {
+			t.Fatalf("could not locate go.mod above %s", testFile)
+		}
+		moduleRoot = parent
+	}
 
 	oldPath := "neuralgentics-broker/src/neuralgentics/broker"
 	newPrefix := "github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker"
