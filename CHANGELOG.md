@@ -4,7 +4,13 @@ All notable changes to the `packages/broker-go` Go module are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-07-21
+
+First standalone release. Extracted from the `neuralgentics` monorepo
+(`packages/broker-go`) with full git history preserved. Includes the
+T-117.5 data-race fix on `ServerEntry` pipes in `Broker.Call`.
+
+`go install github.com/Veedubin/neuralgentics-broker/cmd/broker@v0.1.0`
 
 ### Added
 - **Standalone README + LICENSE (T-131).** `packages/broker-go/README.md`
