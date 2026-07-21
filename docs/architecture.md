@@ -23,6 +23,51 @@ The broker is organized as three cooperating layers.
    server.
 
 <!-- mermaid: call-flow -->
+```mermaid
+flowchart LR
+    subgraph Client["LLM Agent"]
+        A["Agent sends<br/>JSON-RPC over stdio"]
+    end
+
+    subgraph Broker["neuralgentics-broker"]
+        B["Broker<br/>single MCP server<br/>on stdio"]
+        AC["Access Control<br/>role → server<br/>permissions"]
+        IM["Intent Matcher<br/>NL intent →<br/>server/tool pair"]
+        SC["Server Catalog<br/>~600 tokens<br/>role-filtered view"]
+        SK["SkillCatalog<br/>secondary flow"]
+        L["Launcher<br/>spawn if cold<br/>SetRuntime / ClearRuntime"]
+        PR["Proxy<br/>JSON-RPC framing<br/>per-server HTTPClient<br/>session-ID propagation"]
+        AU["Audit<br/>per-call record"]
+    end
+
+    subgraph Servers["MCP Servers"]
+        S1["Server A<br/>stdio"]
+        S2["Server B<br/>HTTP"]
+        S3["Server C<br/>SSE"]
+    end
+
+    A -->|"JSON-RPC"| B
+    B --> AC
+    AC -->|"authorized"| IM
+    AC -->|"denied"| DENY["403 / error"]
+    IM -->|"lookup"| SC
+    IM -->|"skill lookup"| SK
+    IM -->|"matched server/tool"| L
+    L -->|"cold start"| S1
+    L -->|"cold start"| S2
+    L -->|"cold start"| S3
+    L -->|"warm"| PR
+    PR -->|"proxy call"| S1
+    PR -->|"proxy call"| S2
+    PR -->|"proxy call"| S3
+    S1 -->|"response"| PR
+    S2 -->|"response"| PR
+    S3 -->|"response"| PR
+    PR -->|"result"| B
+    B -->|"JSON-RPC response"| A
+    B -->|"per call"| AU
+    AU -->|"write"| AUDIT["Audit Store<br/>PostgreSQL / JSONL"]
+```
 
 ## JSON-RPC stdio proxy
 

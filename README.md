@@ -1,110 +1,144 @@
 # neuralgentics-broker
 
-A Go MCP (Model Context Protocol) broker with built-in tool-call audit, hot-
-reload, and an optional transport swap to route outbound HTTP through a
-centralized egress proxy.
+![CI](https://img.shields.io/github/actions/workflow/status/Veedubin/neuralgentics-broker/ci.yml)
+[![Go 1.25](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](https://go.dev/)
+[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest` gives
-you a `broker` command.
+AI agents see too many tools, and every tool call should be auditable. The
+neuralgentics-broker sits between an MCP client (an LLM agent) and the MCP
+servers it talks to, cuts the tool-list token footprint by roughly 95%
+(12,800 tokens down to ~600), enforces role-based access per server and
+tool, and records every call to JSONL and/or Postgres.
 
-## What it is
+## What it does
 
-`neuralgentics-broker` is a long-running daemon that:
-- Spawns and supervises MCP server subprocesses (stdio, HTTP/SSE)
-- Proxies JSON-RPC calls between a client (e.g., an LLM agent) and the
-  servers
-- Records every tool call to JSONL and/or Postgres
-- Optionally routes the servers' outbound HTTP through the
-  `neuralgentics-gateway` egress proxy
-- Supports hot-reload of the server config without dropping in-flight
+- Spawns and supervises MCP server subprocesses (stdio, HTTP, and SSE
+  transports) and restarts them on exit
+- Proxies JSON-RPC `tools/call` requests between a client and the
+  registered servers, propagating session IDs end-to-end
+- Builds a role-filtered server catalog so each agent persona only sees
+  the tools it is allowed to call
+- Matches free-text intents to the best server/tool pair using a Jaccard
+  similarity scorer with capability-tag bonuses
+- Records every tool call (success, failure, and denied) to JSONL and/or
+  the `broker_audit_log` Postgres table
+- Hot-reloads the server config on `SIGHUP` without dropping in-flight
   connections
+- Optionally routes the servers' outbound HTTP through the
+  `neuralgentics-gateway` egress proxy for policy enforcement and audit
 
-## What this is NOT
+## Architecture
 
-- Not a memory store. (Use [memini-ai](https://github.com/Veedubin/memini-ai-dev)
-  for that.)
-- Not a proxy / egress gateway. (Use [neuralgentics-gateway](https://github.com/Veedubin/neuralgentics_gateway)
-  for that.)
-- Not a web UI. (Use [neuralgentics-web](https://github.com/Veedubin/neuralgentics-web)
-  for that.)
+The broker is organized as three cooperating layers: a **server catalog**
+that builds a role-filtered view of every available server and skill, an
+**intent matcher** that picks the best server/tool pair for a natural-
+language intent, and an **access control** layer that gates which roles
+can see which servers and call which tools. Every catalog read and every
+`Call` goes through access control before reaching a server, and every
+call is recorded by the audit writer.
 
-These products can be used together, but each is independent.
-
-## Install
-
-```bash
-go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest
+```mermaid
+flowchart LR
+    U[User] -->|prompt| OC[OpenCode TUI]
+    OC -->|task| ORCH["Neuralgentics Orchestrator<br/>12 personas + routing matrix"]
+    ORCH -->|query / save| MEM[("memini-ai<br/>trust-weighted memory<br/>PostgreSQL + pgvector")]
+    ORCH -->|dispatch| AG["Specialist sub-agents<br/>coder · architect · tester · writer"]
+    AG -->|"tool calls"| BRK["Neuralgentics Broker<br/>catalog · access control · audit"]
+    BRK --> MCP["MCP Servers<br/>searxng · github · videre · ssh"]
+    AG -->|outbound HTTP| GW["Neuralgentics Gateway<br/>egress policy + audit"]
+    GW --> NET["Internet / LLM APIs"]
+    MEM --> WEB["Neuralgentics Web<br/>dashboards"]
+    GW --> WEB
+    BRK --> WEB
 ```
 
-This puts the `broker` binary in `$GOPATH/bin` (or `$HOME/go/bin` by default).
-Make sure that's on your `$PATH`.
+The full call-flow diagram is in the
+[Architecture guide](https://veedubin.github.io/neuralgentics-broker/architecture/).
 
 ## Quickstart
 
+Install the `broker` binary:
+
 ```bash
-# 1. Create a servers config (see "Config" below)
-cat > servers.yaml <<'EOF'
+go install github.com/Veedubin/neuralgentics-broker/cmd/broker@v0.1.0
+```
+
+For the latest tagged release, drop the version suffix:
+`go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest`.
+
+Create a minimal `servers.yaml`:
+
+```yaml
 servers:
   - name: filesystem
     command: npx
     args: [-y, @modelcontextprotocol/server-filesystem, /tmp]
+    transport: stdio
+    audit:
+      enabled: true
   - name: github
     command: npx
     args: [-y, @modelcontextprotocol/server-github]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: $GITHUB_TOKEN
-EOF
-
-# 2. Start the broker
-broker --config=servers.yaml
-
-# 3. The broker exposes an MCP server on stdio. Wire your agent to it.
-#    (e.g., set the agent's MCP_SERVER_URL to the broker's listen address)
-```
-
-## Config
-
-The broker takes a YAML file describing the MCP servers to spawn:
-
-```yaml
-servers:
-  - name: my-server
-    command: /path/to/mcp-server
-    args: [--port, 8080]
-    env:
-      MY_VAR: my-value
-    transport: stdio  # or http/sse
-    health_check:
-      interval: 30s
-      timeout: 5s
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+    transport: stdio
     audit:
       enabled: true
-      truncate_args: 4096
-      truncate_result: 8192
 ```
 
-## CLI flags
+Start the broker, then send it a JSON-RPC `tools/call` over stdio:
 
-- `--config=PATH` — path to the YAML config (required)
-- `--audit=off|jsonl|jsonl+pg` — where to write tool-call audit records
-  (default `jsonl`)
-- `--audit-jsonl-path=PATH` — JSONL output (default `~/.neuralgentics/broker_audit.jsonl`)
-- `--audit-pg-url=DSN` — Postgres DSN for `jsonl+pg` mode
-- `--audit-flush-interval=DURATION` — buffered write flush interval (default `1s`)
-- `--audit-args-truncate=BYTES` — truncate tool args to this size (default `4096`)
-- `--audit-result-truncate=BYTES` — truncate tool results to this size (default `8192`)
-- `--egress-gateway-url=URL` — route outbound HTTP through this gateway
-  (env var: `EGRESS_GATEWAY_URL`)
-- `--rpc-timeout=DURATION` — per-RPC timeout (default `30s`)
+```bash
+broker --config=servers.yaml --audit=jsonl
+```
 
-## Audit
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"/tmp/README.md"}}}
+```
 
-The broker writes one JSON record per tool call to:
+The broker exposes a single MCP server on stdio. Wire your agent to it
+the same way you would any stdio MCP server (point the agent's MCP
+client at the `broker` process).
 
-- **JSONL** at `~/.neuralgentics/broker_audit.jsonl` by default
-- **Postgres** table `broker_audit_log` (if `--audit-pg-url` is set and `--audit=jsonl+pg`)
+## Features
 
-The schema is:
+### Tool brokering
+
+The broker registers MCP servers from `servers.yaml`, spawns each one as
+a subprocess (stdio) or HTTP/SSE client, and proxies JSON-RPC
+`tools/call` requests to them. `BuildServerCatalog(role)` returns a
+role-filtered view of every available server and tool — the compact
+catalog that cuts the tool-list token footprint from ~12,800 to ~600
+tokens. `ExpandServer(name)` lazily fetches the full tool list for a
+single server on demand.
+
+### Intent matching
+
+`MatchIntent(role, intent)` takes a natural-language string ("read a
+file", "search my memories") and returns the best matching server/tool
+pair. The scorer tokenizes the intent and each tool's name and
+description, computes a Jaccard similarity coefficient, and adds a
+capability-tag bonus. Below-threshold matches return an error so the
+caller can fall back to the catalog.
+
+### Access control
+
+`access.AccessControl` maps server names to the roles allowed to call
+them. `DefaultServerRoles` ships with sensible defaults for the
+neuralgentics persona set (orchestrator, coder, architect, tester,
+writer, git, linter, scraper, researcher, release, and the
+`boomerang-*` variants). The orchestrator role is wildcard-enabled.
+Denied calls return an `ErrUnauthorized` listing the servers the role
+*can* reach, and the denial is recorded by the audit writer.
+
+### Audit
+
+Every tool call — success, failure, and denied — produces one JSON
+record written to:
+
+- **JSONL** at `~/.neuralgentics/broker_audit.jsonl` (default), and/or
+- **Postgres** table `broker_audit_log` when `--audit=jsonl+pg` and
+  `--audit-pg-url` are set
 
 ```sql
 CREATE TABLE broker_audit_log (
@@ -121,48 +155,109 @@ CREATE TABLE broker_audit_log (
 );
 ```
 
-The `neuralgentics-web` `broker-audit` module can read this table and render
-it as a live dashboard.
+The audit writer is asynchronous and buffered; a broken audit sink never
+breaks tool dispatch. Tool args and results are truncated before hashing
+and recording (defaults: 4096 / 8192 bytes). The runtime fields on each
+`ServerEntry` (process handle, stdin/stdout pipes) are read and written
+through locked accessors (`SetRuntime` / `ClearRuntime` / `Snapshot`) so
+the launcher's background watcher goroutine cannot race with a
+concurrent `Call` — the data-race fix that landed in v0.1.0.
 
-## Egress gateway integration
+### Lifecycle
 
-If you run a `neuralgentics-gateway` and want the broker's outbound HTTP to
-go through it (for policy enforcement + audit), set:
-
-```bash
-export EGRESS_GATEWAY_URL=http://localhost:9090
-broker --config=servers.yaml
-```
-
-The broker's `HTTPClient` detects the env var and swaps the transport to a
-proxy-aware one. When `EGRESS_GATEWAY_URL` is empty, the broker uses the
-default transport (no proxying).
-
-## Hot-reload
-
-Send the broker process a `SIGHUP` to reload the config without dropping
-in-flight connections:
+The launcher owns each subprocess's lifecycle: spawn, connect transport,
+stamp the `ServerEntry` with the process handle and pipes, watch for
+exit, and atomically clear the runtime fields on exit. Send the broker
+process a `SIGHUP` to hot-reload the config without dropping in-flight
+connections:
 
 ```bash
 kill -HUP $(pgrep broker)
 ```
 
-New servers are started; removed servers are stopped; existing servers with
-changed env vars get a restart (with a 5s drain window).
+New servers are started, removed servers are stopped, and existing
+servers with changed env vars get a restart with a 5s drain window.
+Setting `EGRESS_GATEWAY_URL` (or `--egress-gateway-url`) swaps the
+HTTP/SSE transport to a proxy-aware one that routes outbound HTTP
+through the `neuralgentics-gateway` egress proxy; an invalid URL falls
+back to the default transport so a misconfiguration never hard-breaks
+broker calls.
 
-## As a library
+### Skills
 
-Importable as a Go module:
+The `SkillCatalog` aggregates skill definitions from two sources and
+presents them to the intent matcher as a role-filtered view:
 
-```go
-import "github.com/Veedubin/neuralgentics-broker/src/neuralgentics/broker"
+- **Local** skills, read from the workspace `.opencode/skills/`
+  directory
+- **External** skills, read from `--external-skills-dir` (e.g.
+  `~/.neuralgentics/external-skills/`)
 
-b := broker.New(configPath, broker.WithAuditWriter(myWriter))
-go b.Start()
-defer b.Stop()
+Every external skill is stamped with an `ExternalProvenance` record
+(repo, commit SHA, license, attribution) so the broker can attribute it
+and track trust over time. The full manifest of every external repo is
+written to `MANIFEST.json` in the external skills directory. A
+`SkillBodyCache` keeps an in-memory LRU cache of recently-read skill
+bodies, keyed by absolute path, evicting the least-recently-used entry
+when it fills and invalidating on `SIGHUP` so config and skills reload
+together.
+
+## Configuration
+
+The broker reads a YAML file describing the MCP servers to spawn, plus
+CLI flags that tune audit, transport, and timeouts.
+
+```yaml
+servers:
+  - name: my-server
+    command: /path/to/mcp-server
+    args: [--port, 8080]
+    env:
+      MY_VAR: my-value
+    transport: stdio          # stdio | http | sse
+    health_check:
+      interval: 30s
+      timeout: 5s
+    audit:
+      enabled: true
+      truncate_args: 4096
+      truncate_result: 8192
 ```
 
-See `cmd/broker/main.go` for a reference implementation.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config=PATH` | (required) | Path to the YAML config |
+| `--audit=off\|jsonl\|jsonl+pg` | `jsonl` | Audit sink selection |
+| `--audit-jsonl-path=PATH` | `~/.neuralgentics/broker_audit.jsonl` | JSONL output path |
+| `--audit-pg-url=DSN` | (none) | Postgres DSN for `jsonl+pg` mode |
+| `--audit-flush-interval=DURATION` | `1s` | Buffered write flush interval |
+| `--audit-args-truncate=BYTES` | `4096` | Cap args_hash length |
+| `--audit-result-truncate=BYTES` | `8192` | Cap result_size reporting |
+| `--egress-gateway-url=URL` | (none) | Route outbound HTTP through this gateway (env: `EGRESS_GATEWAY_URL`) |
+| `--rpc-timeout=DURATION` | `30s` | Per-RPC timeout |
+
+Full reference: the [Configuration guide](https://veedubin.github.io/neuralgentics-broker/configuration/).
+
+## Documentation
+
+- [Home](https://veedubin.github.io/neuralgentics-broker/)
+- [Getting Started](https://veedubin.github.io/neuralgentics-broker/getting-started/)
+- [Configuration](https://veedubin.github.io/neuralgentics-broker/configuration/)
+- [Architecture](https://veedubin.github.io/neuralgentics-broker/architecture/)
+- [Audit](https://veedubin.github.io/neuralgentics-broker/audit/)
+- [Skills](https://veedubin.github.io/neuralgentics-broker/skills/)
+- [Changelog](https://veedubin.github.io/neuralgentics-broker/changelog/)
+
+## Development
+
+```bash
+make build        # go build ./...
+make vet          # go vet ./...
+make test         # go test ./...
+make test-short   # go test -short ./...
+make install      # go install ./cmd/broker
+make tidy         # go mod tidy
+```
 
 ## License
 
