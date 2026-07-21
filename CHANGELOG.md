@@ -4,6 +4,24 @@ All notable changes to the `packages/broker-go` Go module are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-07-21
+
+Docs-only: install-command hygiene. No functional changes to the broker.
+
+### Changed
+
+- README pinned install command updated from the stale `@v0.1.0` to
+  `@v0.1.3` so the documented one-liner matches the latest release.
+  The `@latest` shortcut is demoted to a "track latest at your own risk"
+  note — pinned installs are the reproducible default.
+- `readme_test.go` guard now requires the README to pin the exact
+  version parsed from the first `## [X.Y.Z]` heading in CHANGELOG.md,
+  instead of asserting the `@latest` shortcut. This makes the guard
+  evergreen: future version bumps only touch CHANGELOG + README, not
+  the test. Added `TestReadmePinnedVersionGuardFails` and
+  `TestParseChangelogVersion` to prove the guard fails when the pin is
+  absent and the parser picks the first version heading.
+
 ## [0.1.2] - 2026-07-21
 
 Docs-only: ecosystem diagram + architecture page now state the first-class (memini-ai, registered in opencode.json, bypasses the broker) vs brokered MCP split. No functional changes.

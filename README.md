@@ -63,11 +63,14 @@ The full call-flow diagram is in the
 Install the `broker` binary:
 
 ```bash
-go install github.com/Veedubin/neuralgentics-broker/cmd/broker@v0.1.0
+go install github.com/Veedubin/neuralgentics-broker/cmd/broker@v0.1.3
 ```
 
-For the latest tagged release, drop the version suffix:
-`go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest`.
+> Tip: to track the latest tagged release instead, drop the version
+> suffix (`go install github.com/Veedubin/neuralgentics-broker/cmd/broker@latest`),
+> but this is at your own risk — breaking changes can land in a new
+> tag without warning. The pinned command above is the recommended
+> reproducible install.
 
 Create a minimal `servers.yaml`:
 
