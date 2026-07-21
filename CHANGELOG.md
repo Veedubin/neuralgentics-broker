@@ -4,6 +4,10 @@ All notable changes to the `packages/broker-go` Go module are documented
 in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-21
+
+Docs-only: ecosystem diagram + architecture page now state the first-class (memini-ai, registered in opencode.json, bypasses the broker) vs brokered MCP split. No functional changes.
+
 ## [0.1.1] - 2026-07-21
 
 Documentation overhaul. No functional changes.
